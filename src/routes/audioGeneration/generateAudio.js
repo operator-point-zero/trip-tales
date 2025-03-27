@@ -10,7 +10,9 @@ dotenv.config();
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const storage = new Storage({ keyFilename: process.env.GOOGLE_APPLICATION_CREDENTIALS });
+const storage = new Storage({
+  credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS)
+});
 const bucketName = process.env.GCS_BUCKET_NAME;
 
 const TourDescriptionSchema = new mongoose.Schema({
@@ -30,19 +32,7 @@ async function generateNarration(locationName, lat, lng, language) {
     console.log(`Generating narration in language: ${language}`);
     const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
-    const prompt = `You are a knowledgeable, engaging local tour guide. Create an immersive, detailed narration (300-400 words) about ${locationName} (located at latitude ${lat}, longitude ${lng}). 
-    
-    Include:
-    - Historical background and significance
-    - Interesting cultural aspects
-    - Local stories or legends
-    - Notable features or landmarks
-    - Small details that only locals would know
-    - Sensory details (sights, sounds, smells)
-    
-    Make the narration personal and conversational, as if you're guiding a traveler through the location in person. Use vivid language and create a sense of place that makes the listener feel they're experiencing the location firsthand. 
-    
-    Respond in ${language}.`;
+    const prompt = `You are a knowledgeable, engaging local tour guide. Create an immersive, detailed narration (300-400 words) about ${locationName} (located at latitude ${lat}, longitude ${lng}). \n\n    Include:\n    - Historical background and significance\n    - Interesting cultural aspects\n    - Local stories or legends\n    - Notable features or landmarks\n    - Small details that only locals would know\n    - Sensory details (sights, sounds, smells)\n\n    Make the narration personal and conversational, as if you're guiding a traveler through the location in person. Use vivid language and create a sense of place that makes the listener feel they're experiencing the location firsthand. \n\n    Respond in ${language}.`;
 
     const result = await model.generateContent(prompt);
     console.log('Gemini response:', result.response.text());
@@ -153,49 +143,6 @@ router.post('/', async (req, res) => {
         audioUrl,
       });
     }
-  } catch (error) {
-    console.error('Operation failed:', error);
-    res.status(500).json({ error: error.message || 'Operation failed' });
-  }
-});
-
-router.get('/narration/:locationId/:language', async (req, res) => {
-  try {
-    const tour = await TourDescription.findOne({ locationId: req.params.locationId });
-    if (!tour || !tour.audioUrls || !tour.audioUrls.get(req.params.language) || !tour.narrations.get(req.params.language)) {
-      return res.status(404).json({ error: 'Narration not found for this language' });
-    }
-    res.json({
-      narration: tour.narrations.get(req.params.language),
-      locationName: tour.locationName,
-      coordinates: { lat: tour.lat, lng: tour.lng },
-      audioUrl: tour.audioUrls.get(req.params.language),
-    });
-  } catch (error) {
-    console.error('Database error:', error);
-    res.status(500).json({ error: 'Database operation failed' });
-  }
-});
-
-router.post('/regenerate/:locationId/:language', async (req, res) => {
-  try {
-    const tour = await TourDescription.findOne({ locationId: req.params.locationId });
-    if (!tour) {
-      return res.status(404).json({ error: 'Location not found' });
-    }
-
-    const newNarration = await generateNarration(tour.locationName, tour.lat, tour.lng, req.params.language);
-    const newAudioUrl = await generateAndSaveAudio(newNarration, tour.locationId, req.params.language);
-
-    tour.audioUrls.set(req.params.language, newAudioUrl);
-    tour.narrations.set(req.params.language, newNarration);
-    await tour.save();
-
-    res.json({
-      message: 'Narration and audio regenerated successfully for this language',
-      narration: newNarration,
-      audioUrl: newAudioUrl,
-    });
   } catch (error) {
     console.error('Operation failed:', error);
     res.status(500).json({ error: error.message || 'Operation failed' });
