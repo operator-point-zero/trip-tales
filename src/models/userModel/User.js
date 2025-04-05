@@ -1,25 +1,28 @@
+
 // import mongoose from "mongoose";
 
-// const UserSchema = new mongoose.Schema({
-//   googleId: { type: String, unique: true, sparse: true },
-//   appleId: { type: String, unique: true, sparse: true },
-//   email: { type: String, required: true, unique: true },
-//   name: { type: String },
-//   profPicUrl: { type: String },
-//   authProvider: { type: String, enum: ["google", "apple"], required: true },
+// const UserSchema = new mongoose.Schema(
+//   {
+//     googleId: { type: String, unique: true, sparse: true },
+//     appleId: { type: String, unique: true, sparse: true },
+//     email: { type: String, required: true, unique: true, index: true },
+//     name: { type: String },
+//     profPicUrl: { type: String },
+//     authProvider: { type: String, enum: ["google", "apple"], required: true },
 
-//   subscription: {
-//     status: { type: String, enum: ["free", "monthly", "annual"], default: "free" },
-//     expiryDate: { type: Date, default: null },
+//     subscription: {
+//       status: { type: String, enum: ["free", "monthly", "annual"], default: "free" },
+//       expiryDate: { type: Date, default: null },
+//     },
+
+//     purchasedTours: [{ type: mongoose.Schema.Types.ObjectId, ref: "Tour" }], // Stores references to Tour documents
 //   },
-
-//   purchasedTours: [{ type: String }], // Stores tour IDs for one-time purchases
-
-//   createdAt: { type: Date, default: Date.now },
-// });
+//   { timestamps: true } // Automatically adds createdAt and updatedAt fields
+// );
 
 // export default mongoose.model("User", UserSchema);
 
+// models/userModel/User.js
 import mongoose from "mongoose";
 
 const UserSchema = new mongoose.Schema(
@@ -30,17 +33,19 @@ const UserSchema = new mongoose.Schema(
     name: { type: String },
     profPicUrl: { type: String },
     authProvider: { type: String, enum: ["google", "apple"], required: true },
+    fcmToken: { type: String, default: null },
 
     subscription: {
       status: { type: String, enum: ["free", "monthly", "annual"], default: "free" },
       expiryDate: { type: Date, default: null },
     },
 
-    purchasedTours: [{ type: mongoose.Schema.Types.ObjectId, ref: "Tour" }], // Stores references to Tour documents
+    purchasedTours: [{ type: mongoose.Schema.Types.ObjectId, ref: "Tour" }],
   },
-  { timestamps: true } // Automatically adds createdAt and updatedAt fields
+  { timestamps: true }
 );
 
 export default mongoose.model("User", UserSchema);
+
 
 
