@@ -721,38 +721,86 @@ const filterExperiencesForUser = (experiences, userLat, userLon, params = {}) =>
 };
 
 // New function to deduplicate generated experiences
+// const deduplicateExperiences = (experiences) => {
+//   if (!experiences || experiences.length === 0) return [];
+  
+//   // Track used locations
+//   const usedLocationIds = new Set();
+//   const dedupedExperiences = [];
+  
+//   // Sort by number of locations (prioritize experiences with more locations)
+//   const sortedExperiences = [...experiences].sort(
+//     (a, b) => b.locations.length - a.locations.length
+//   );
+  
+//   for (const exp of sortedExperiences) {
+//     // Check if this experience has mainly new locations
+//     const totalLocations = exp.locations.length;
+//     const newLocations = exp.locations.filter(loc => {
+//       const locId = loc.placeId || `${loc.lat.toFixed(5)},${loc.lon.toFixed(5)}`;
+//       return !usedLocationIds.has(locId);
+//     });
+    
+//     // If at least 75% of the locations are new, keep this experience
+//     if (newLocations.length >= totalLocations * 0.75) {
+//       dedupedExperiences.push(exp);
+      
+//       // Mark these locations as used
+//       exp.locations.forEach(loc => {
+//         const locId = loc.placeId || `${loc.lat.toFixed(5)},${loc.lon.toFixed(5)}`;
+//         usedLocationIds.add(locId);
+//       });
+//     }
+//   }
+  
+//   return dedupedExperiences;
+// };
+
+
 const deduplicateExperiences = (experiences) => {
   if (!experiences || experiences.length === 0) return [];
-  
-  // Track used locations
-  const usedLocationIds = new Set();
-  const dedupedExperiences = [];
-  
-  // Sort by number of locations (prioritize experiences with more locations)
-  const sortedExperiences = [...experiences].sort(
-    (a, b) => b.locations.length - a.locations.length
-  );
-  
-  for (const exp of sortedExperiences) {
-    // Check if this experience has mainly new locations
-    const totalLocations = exp.locations.length;
-    const newLocations = exp.locations.filter(loc => {
-      const locId = loc.placeId || `${loc.lat.toFixed(5)},${loc.lon.toFixed(5)}`;
-      return !usedLocationIds.has(locId);
+
+  const allUniqueLocations = new Set();
+  experiences.forEach(exp => {
+    exp.locations.forEach(loc => {
+      allUniqueLocations.add(loc.placeId || `${loc.lat.toFixed(5)},${loc.lon.toFixed(5)}`);
     });
-    
-    // If at least 75% of the locations are new, keep this experience
-    if (newLocations.length >= totalLocations * 0.75) {
-      dedupedExperiences.push(exp);
-      
-      // Mark these locations as used
-      exp.locations.forEach(loc => {
-        const locId = loc.placeId || `${loc.lat.toFixed(5)},${loc.lon.toFixed(5)}`;
-        usedLocationIds.add(locId);
+  });
+
+  const dedupedExperiences = [];
+  const coveredLocationIds = new Set();
+
+  while (coveredLocationIds.size < allUniqueLocations.size) {
+    let bestExperience = null;
+    let maxNewLocations = 0;
+
+    for (const exp of experiences) {
+      let currentNewLocations = 0;
+      const expLocationIds = exp.locations.map(loc => loc.placeId || `${loc.lat.toFixed(5)},${loc.lon.toFixed(5)}`);
+
+      expLocationIds.forEach(locId => {
+        if (!coveredLocationIds.has(locId)) {
+          currentNewLocations++;
+        }
       });
+
+      if (currentNewLocations > maxNewLocations) {
+        maxNewLocations = currentNewLocations;
+        bestExperience = exp;
+      }
     }
+
+    if (!bestExperience) {
+      // This should ideally not happen if there are still uncovered locations
+      break;
+    }
+
+    dedupedExperiences.push(bestExperience);
+    bestExperience.locations.forEach(loc => {
+      coveredLocationIds.add(loc.placeId || `${loc.lat.toFixed(5)},${loc.lon.toFixed(5)}`);
+    });
   }
-  
+
   return dedupedExperiences;
 };
 
