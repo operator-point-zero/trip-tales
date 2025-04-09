@@ -757,6 +757,53 @@ const filterExperiencesForUser = (experiences, userLat, userLon, params = {}) =>
 // };
 
 
+// const deduplicateExperiences = (experiences) => {
+//   if (!experiences || experiences.length === 0) return [];
+
+//   const allUniqueLocations = new Set();
+//   experiences.forEach(exp => {
+//     exp.locations.forEach(loc => {
+//       allUniqueLocations.add(loc.placeId || `${loc.lat.toFixed(5)},${loc.lon.toFixed(5)}`);
+//     });
+//   });
+
+//   const dedupedExperiences = [];
+//   const coveredLocationIds = new Set();
+
+//   while (coveredLocationIds.size < allUniqueLocations.size) {
+//     let bestExperience = null;
+//     let maxNewLocations = 0;
+
+//     for (const exp of experiences) {
+//       let currentNewLocations = 0;
+//       const expLocationIds = exp.locations.map(loc => loc.placeId || `${loc.lat.toFixed(5)},${loc.lon.toFixed(5)}`);
+
+//       expLocationIds.forEach(locId => {
+//         if (!coveredLocationIds.has(locId)) {
+//           currentNewLocations++;
+//         }
+//       });
+
+//       if (currentNewLocations > maxNewLocations) {
+//         maxNewLocations = currentNewLocations;
+//         bestExperience = exp;
+//       }
+//     }
+
+//     if (!bestExperience) {
+//       // This should ideally not happen if there are still uncovered locations
+//       break;
+//     }
+
+//     dedupedExperiences.push(bestExperience);
+//     bestExperience.locations.forEach(loc => {
+//       coveredLocationIds.add(loc.placeId || `${loc.lat.toFixed(5)},${loc.lon.toFixed(5)}`);
+//     });
+//   }
+
+//   return dedupedExperiences;
+// };
+
 const deduplicateExperiences = (experiences) => {
   if (!experiences || experiences.length === 0) return [];
 
@@ -769,12 +816,18 @@ const deduplicateExperiences = (experiences) => {
 
   const dedupedExperiences = [];
   const coveredLocationIds = new Set();
+  const addedExperienceIndices = new Set(); // Track indices of added experiences
 
   while (coveredLocationIds.size < allUniqueLocations.size) {
-    let bestExperience = null;
+    let bestExperienceIndex = -1;
     let maxNewLocations = 0;
 
-    for (const exp of experiences) {
+    for (let i = 0; i < experiences.length; i++) {
+      if (addedExperienceIndices.has(i)) {
+        continue; // Skip already added experiences
+      }
+
+      const exp = experiences[i];
       let currentNewLocations = 0;
       const expLocationIds = exp.locations.map(loc => loc.placeId || `${loc.lat.toFixed(5)},${loc.lon.toFixed(5)}`);
 
@@ -786,16 +839,18 @@ const deduplicateExperiences = (experiences) => {
 
       if (currentNewLocations > maxNewLocations) {
         maxNewLocations = currentNewLocations;
-        bestExperience = exp;
+        bestExperienceIndex = i;
       }
     }
 
-    if (!bestExperience) {
+    if (bestExperienceIndex === -1) {
       // This should ideally not happen if there are still uncovered locations
       break;
     }
 
+    const bestExperience = experiences[bestExperienceIndex];
     dedupedExperiences.push(bestExperience);
+    addedExperienceIndices.add(bestExperienceIndex); // Mark as added
     bestExperience.locations.forEach(loc => {
       coveredLocationIds.add(loc.placeId || `${loc.lat.toFixed(5)},${loc.lon.toFixed(5)}`);
     });
