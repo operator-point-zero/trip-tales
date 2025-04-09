@@ -58,7 +58,7 @@ const getLocationNameFromCoordinates = async (lat, lon) => {
 };
 
 // Enhanced to fetch and categorize places
-const getNearbyPlaces = async (lat, lon, radius = 1000) => {
+const getNearbyPlaces = async (lat, lon, radius = 5000) => {
   try {
     // Check cache first
     const cacheKey = placesCache.getKey(lat, lon, radius);
@@ -197,80 +197,9 @@ const getWeightedRandomSelection = (items, count, weights = null) => {
 };
 
 // NEW: Function to generate diverse location sets
-// const generateDiverseLocationSets = (attractions, userLat, userLon, numSets = 10, locationsPerSet = 4) => {
-//   // Categorize all attractions
-//   const categorized = categorizeAttractions(attractions);
-  
-//   // Calculate distance from user to each attraction
-//   attractions.forEach(place => {
-//     place.distanceFromUser = Math.sqrt(
-//       Math.pow(place.lat - userLat, 2) + Math.pow(place.lon - userLon, 2)
-//     );
-//   });
-  
-//   // Prepare diverse theme sets
-//   const themeSets = [
-//     // Format: [Theme name, [categories to sample from], min items per category]
-//     ["Historical Highlights", ["historical", "landmarks"], 2],
-//     ["Arts & Culture", ["museums", "arts", "historical"], 2],
-//     ["Nature Escape", ["nature", "landmarks"], 2],
-//     ["Religious Heritage", ["religious", "historical"], 2],
-//     ["Family Fun", ["entertainment", "nature", "landmarks"], 2],
-//     ["Local Neighborhoods", ["neighborhoods", "shopping", "landmarks"], 2],
-//     ["Hidden Gems", ["other", "landmarks", "neighborhoods"], 2],
-//     ["Architectural Marvels", ["historical", "religious", "landmarks"], 2],
-//     ["Photography Spots", ["nature", "landmarks", "historical"], 2],
-//     ["Cultural Immersion", ["museums", "arts", "neighborhoods"], 2]
-//   ];
-  
-//   // Generate diverse location sets
-//   const locationSets = [];
-//   for (let i = 0; i < numSets && i < themeSets.length; i++) {
-//     const [theme, categoriesToUse, minPerCategory] = themeSets[i];
-    
-//     // Gather all available attractions for this theme
-//     let availableForTheme = [];
-//     categoriesToUse.forEach(category => {
-//       if (categorized[category] && categorized[category].length > 0) {
-//         availableForTheme = [...availableForTheme, ...categorized[category]];
-//       }
-//     });
-    
-//     // Remove duplicates (same place might be in multiple categories)
-//     availableForTheme = Array.from(
-//       new Map(availableForTheme.map(item => [item.placeId, item])).values()
-//     );
-    
-//     // Apply proximity weighting (favor closer places)
-//     const weights = availableForTheme.map(place => 
-//       1 / (place.distanceFromUser + 0.01) // Add small value to avoid division by zero
-//     );
-    
-//     // Get unique locations for this set
-//     const selectedLocations = getWeightedRandomSelection(
-//       availableForTheme, 
-//       locationsPerSet,
-//       weights
-//     );
-    
-//     // If we have enough locations, add this set
-//     if (selectedLocations.length >= 2) {
-//       locationSets.push({
-//         theme,
-//         locations: selectedLocations
-//       });
-//     }
-//   }
-  
-//   return locationSets;
-// };
-
 const generateDiverseLocationSets = (attractions, userLat, userLon, numSets = 10, locationsPerSet = 4) => {
   // Categorize all attractions
   const categorized = categorizeAttractions(attractions);
-  
-  // Track which locations have been used to prevent duplicates
-  const usedLocationIds = new Set();
   
   // Calculate distance from user to each attraction
   attractions.forEach(place => {
@@ -303,11 +232,7 @@ const generateDiverseLocationSets = (attractions, userLat, userLon, numSets = 10
     let availableForTheme = [];
     categoriesToUse.forEach(category => {
       if (categorized[category] && categorized[category].length > 0) {
-        // Only add locations that haven't been used yet
-        const unusedLocations = categorized[category].filter(
-          location => !usedLocationIds.has(location.placeId)
-        );
-        availableForTheme = [...availableForTheme, ...unusedLocations];
+        availableForTheme = [...availableForTheme, ...categorized[category]];
       }
     });
     
@@ -315,11 +240,6 @@ const generateDiverseLocationSets = (attractions, userLat, userLon, numSets = 10
     availableForTheme = Array.from(
       new Map(availableForTheme.map(item => [item.placeId, item])).values()
     );
-    
-    // If we don't have enough unique locations for this theme, skip it
-    if (availableForTheme.length < minPerCategory) {
-      continue;
-    }
     
     // Apply proximity weighting (favor closer places)
     const weights = availableForTheme.map(place => 
@@ -333,18 +253,11 @@ const generateDiverseLocationSets = (attractions, userLat, userLon, numSets = 10
       weights
     );
     
-    // If we have enough locations, add this set and mark locations as used
-    if (selectedLocations.length >= minPerCategory) {
+    // If we have enough locations, add this set
+    if (selectedLocations.length >= 2) {
       locationSets.push({
         theme,
         locations: selectedLocations
-      });
-      
-      // Mark these locations as used
-      selectedLocations.forEach(location => {
-        if (location.placeId) {
-          usedLocationIds.add(location.placeId);
-        }
       });
     }
   }
@@ -566,97 +479,37 @@ const rateLimit = (req, res, next) => {
 };
 
 // NEW: Helper to filter out experiences that don't match user preferences
-// const filterExperiencesForUser = (experiences, userLat, userLon, params = {}) => {
-//   // Calculate diversity score based on how many experiences share same locations
-//   const locationCounts = new Map();
-//   let totalLocations = 0;
-  
-//   experiences.forEach(exp => {
-//     exp.locations.forEach(loc => {
-//       const locKey = `${loc.lat.toFixed(5)},${loc.lon.toFixed(5)}`;
-//       locationCounts.set(locKey, (locationCounts.get(locKey) || 0) + 1);
-//       totalLocations++;
-//     });
-//   });
-  
-//   // Calculate average location occurrence
-//   const avgOccurrence = totalLocations / Math.max(1, locationCounts.size);
-  
-//   // Score experiences based on location diversity and proximity to user
-//   experiences.forEach(exp => {
-//     // Base score starts at 50
-//     let score = 50;
-    
-//     // Diversity score - lower is better (less overlap with other experiences)
-//     let diversityScore = 0;
-//     exp.locations.forEach(loc => {
-//       const locKey = `${loc.lat.toFixed(5)},${loc.lon.toFixed(5)}`;
-//       diversityScore += locationCounts.get(locKey) / avgOccurrence;
-//     });
-//     diversityScore = diversityScore / exp.locations.length;
-    
-//     // Lower score for experiences with many duplicate locations
-//     score -= (diversityScore - 1) * 15;
-    
-//     // Proximity score - higher for locations closer to user
-//     let proximityScore = 0;
-//     exp.locations.forEach(loc => {
-//       const distance = Math.sqrt(Math.pow(loc.lat - userLat, 2) + Math.pow(loc.lon - userLon, 2));
-//       // Convert to a 0-10 score where 10 is closest
-//       proximityScore += Math.max(0, 10 - (distance * 500));
-//     });
-//     proximityScore = proximityScore / exp.locations.length;
-    
-//     // Add proximity bonus
-//     score += proximityScore * 2;
-    
-//     // Store the score with the experience
-//     exp.relevanceScore = Math.round(score);
-//   });
-  
-//   // Sort by relevance score and return the top ones
-//   return experiences.sort((a, b) => b.relevanceScore - a.relevanceScore);
-// };
-
 const filterExperiencesForUser = (experiences, userLat, userLon, params = {}) => {
-  if (!experiences || experiences.length === 0) return [];
+  // Calculate diversity score based on how many experiences share same locations
+  const locationCounts = new Map();
+  let totalLocations = 0;
   
-  // Step 1: Calculate location uniqueness across all experiences
-  const locationMap = new Map(); // Maps location ID to number of occurrences
-  const experienceLocationMap = new Map(); // Maps experience ID to its locations
-  
-  // Build location occurrence map
   experiences.forEach(exp => {
-    const expId = exp._id.toString();
-    const expLocations = new Set();
-    
     exp.locations.forEach(loc => {
-      const locId = loc.placeId || `${loc.lat.toFixed(5)},${loc.lon.toFixed(5)}`;
-      locationMap.set(locId, (locationMap.get(locId) || 0) + 1);
-      expLocations.add(locId);
+      const locKey = `${loc.lat.toFixed(5)},${loc.lon.toFixed(5)}`;
+      locationCounts.set(locKey, (locationCounts.get(locKey) || 0) + 1);
+      totalLocations++;
     });
-    
-    experienceLocationMap.set(expId, Array.from(expLocations));
   });
   
-  // Step 2: Calculate diversity and uniqueness scores
+  // Calculate average location occurrence
+  const avgOccurrence = totalLocations / Math.max(1, locationCounts.size);
+  
+  // Score experiences based on location diversity and proximity to user
   experiences.forEach(exp => {
-    const expId = exp._id.toString();
-    const expLocations = experienceLocationMap.get(expId) || [];
-    
     // Base score starts at 50
     let score = 50;
     
-    // Uniqueness score - higher for experiences with more unique locations
-    let uniquenessScore = 0;
-    expLocations.forEach(locId => {
-      // Locations that appear in fewer experiences get higher scores
-      uniquenessScore += 10 / (locationMap.get(locId) || 1);
+    // Diversity score - lower is better (less overlap with other experiences)
+    let diversityScore = 0;
+    exp.locations.forEach(loc => {
+      const locKey = `${loc.lat.toFixed(5)},${loc.lon.toFixed(5)}`;
+      diversityScore += locationCounts.get(locKey) / avgOccurrence;
     });
-    uniquenessScore = uniquenessScore / Math.max(1, expLocations.length);
+    diversityScore = diversityScore / exp.locations.length;
     
-    // Add uniqueness bonus (max 25 points)
-    score += Math.min(25, uniquenessScore * 2);
+    // Lower score for experiences with many duplicate locations
+    score -= (diversityScore - 1) * 15;
     
     // Proximity score - higher for locations closer to user
     let proximityScore = 0;
@@ -665,198 +518,17 @@ const filterExperiencesForUser = (experiences, userLat, userLon, params = {}) =>
       // Convert to a 0-10 score where 10 is closest
       proximityScore += Math.max(0, 10 - (distance * 500));
     });
-    proximityScore = proximityScore / Math.max(1, exp.locations.length);
+    proximityScore = proximityScore / exp.locations.length;
     
-    // Add proximity bonus (max 15 points)
-    score += Math.min(15, proximityScore * 1.5);
-    
-    // User preference matching (if provided)
-    if (params.preferredCategories && Array.isArray(params.preferredCategories)) {
-      let matchScore = 0;
-      exp.locations.forEach(loc => {
-        if (loc.types && Array.isArray(loc.types)) {
-          const matchingTypes = loc.types.filter(type => 
-            params.preferredCategories.includes(type)
-          );
-          matchScore += matchingTypes.length * 2;
-        }
-      });
-      
-      // Add preference match bonus (max 10 points)
-      score += Math.min(10, matchScore);
-    }
+    // Add proximity bonus
+    score += proximityScore * 2;
     
     // Store the score with the experience
     exp.relevanceScore = Math.round(score);
   });
   
-  // Step 3: Greedily select experiences to maximize location diversity
-  const selectedExperiences = [];
-  const usedLocations = new Set();
-  
-  // First sort by relevance score
-  const sortedExperiences = [...experiences].sort((a, b) => b.relevanceScore - a.relevanceScore);
-  
-  // Greedily select experiences with the most unique locations
-  for (const exp of sortedExperiences) {
-    // Skip if we've already selected enough
-    if (selectedExperiences.length >= 10) break;
-    
-    const expId = exp._id.toString();
-    const expLocations = experienceLocationMap.get(expId) || [];
-    
-    // Calculate how many new locations this experience would add
-    const newLocations = expLocations.filter(locId => !usedLocations.has(locId));
-    
-    // If this experience adds at least one new location, include it
-    if (newLocations.length > 0) {
-      selectedExperiences.push(exp);
-      
-      // Mark these locations as used
-      newLocations.forEach(locId => usedLocations.add(locId));
-    }
-  }
-  
-  return selectedExperiences;
-};
-
-// New function to deduplicate generated experiences
-// const deduplicateExperiences = (experiences) => {
-//   if (!experiences || experiences.length === 0) return [];
-  
-//   // Track used locations
-//   const usedLocationIds = new Set();
-//   const dedupedExperiences = [];
-  
-//   // Sort by number of locations (prioritize experiences with more locations)
-//   const sortedExperiences = [...experiences].sort(
-//     (a, b) => b.locations.length - a.locations.length
-//   );
-  
-//   for (const exp of sortedExperiences) {
-//     // Check if this experience has mainly new locations
-//     const totalLocations = exp.locations.length;
-//     const newLocations = exp.locations.filter(loc => {
-//       const locId = loc.placeId || `${loc.lat.toFixed(5)},${loc.lon.toFixed(5)}`;
-//       return !usedLocationIds.has(locId);
-//     });
-    
-//     // If at least 75% of the locations are new, keep this experience
-//     if (newLocations.length >= totalLocations * 0.75) {
-//       dedupedExperiences.push(exp);
-      
-//       // Mark these locations as used
-//       exp.locations.forEach(loc => {
-//         const locId = loc.placeId || `${loc.lat.toFixed(5)},${loc.lon.toFixed(5)}`;
-//         usedLocationIds.add(locId);
-//       });
-//     }
-//   }
-  
-//   return dedupedExperiences;
-// };
-
-
-// const deduplicateExperiences = (experiences) => {
-//   if (!experiences || experiences.length === 0) return [];
-
-//   const allUniqueLocations = new Set();
-//   experiences.forEach(exp => {
-//     exp.locations.forEach(loc => {
-//       allUniqueLocations.add(loc.placeId || `${loc.lat.toFixed(5)},${loc.lon.toFixed(5)}`);
-//     });
-//   });
-
-//   const dedupedExperiences = [];
-//   const coveredLocationIds = new Set();
-
-//   while (coveredLocationIds.size < allUniqueLocations.size) {
-//     let bestExperience = null;
-//     let maxNewLocations = 0;
-
-//     for (const exp of experiences) {
-//       let currentNewLocations = 0;
-//       const expLocationIds = exp.locations.map(loc => loc.placeId || `${loc.lat.toFixed(5)},${loc.lon.toFixed(5)}`);
-
-//       expLocationIds.forEach(locId => {
-//         if (!coveredLocationIds.has(locId)) {
-//           currentNewLocations++;
-//         }
-//       });
-
-//       if (currentNewLocations > maxNewLocations) {
-//         maxNewLocations = currentNewLocations;
-//         bestExperience = exp;
-//       }
-//     }
-
-//     if (!bestExperience) {
-//       // This should ideally not happen if there are still uncovered locations
-//       break;
-//     }
-
-//     dedupedExperiences.push(bestExperience);
-//     bestExperience.locations.forEach(loc => {
-//       coveredLocationIds.add(loc.placeId || `${loc.lat.toFixed(5)},${loc.lon.toFixed(5)}`);
-//     });
-//   }
-
-//   return dedupedExperiences;
-// };
-
-const deduplicateExperiences = (experiences) => {
-  if (!experiences || experiences.length === 0) return [];
-
-  const allUniqueLocations = new Set();
-  experiences.forEach(exp => {
-    exp.locations.forEach(loc => {
-      allUniqueLocations.add(loc.placeId || `${loc.lat.toFixed(5)},${loc.lon.toFixed(5)}`);
-    });
-  });
-
-  const dedupedExperiences = [];
-  const coveredLocationIds = new Set();
-  const addedExperienceIndices = new Set(); // Track indices of added experiences
-
-  while (coveredLocationIds.size < allUniqueLocations.size) {
-    let bestExperienceIndex = -1;
-    let maxNewLocations = 0;
-
-    for (let i = 0; i < experiences.length; i++) {
-      if (addedExperienceIndices.has(i)) {
-        continue; // Skip already added experiences
-      }
-
-      const exp = experiences[i];
-      let currentNewLocations = 0;
-      const expLocationIds = exp.locations.map(loc => loc.placeId || `${loc.lat.toFixed(5)},${loc.lon.toFixed(5)}`);
-
-      expLocationIds.forEach(locId => {
-        if (!coveredLocationIds.has(locId)) {
-          currentNewLocations++;
-        }
-      });
-
-      if (currentNewLocations > maxNewLocations) {
-        maxNewLocations = currentNewLocations;
-        bestExperienceIndex = i;
-      }
-    }
-
-    if (bestExperienceIndex === -1) {
-      // This should ideally not happen if there are still uncovered locations
-      break;
-    }
-
-    const bestExperience = experiences[bestExperienceIndex];
-    dedupedExperiences.push(bestExperience);
-    addedExperienceIndices.add(bestExperienceIndex); // Mark as added
-    bestExperience.locations.forEach(loc => {
-      coveredLocationIds.add(loc.placeId || `${loc.lat.toFixed(5)},${loc.lon.toFixed(5)}`);
-    });
-  }
-
-  return dedupedExperiences;
+  // Sort by relevance score and return the top ones
+  return experiences.sort((a, b) => b.relevanceScore - a.relevanceScore);
 };
 
 // NEW: Function to save experiences with a storage strategy
@@ -881,158 +553,6 @@ const saveExperiencesToDatabase = async (experiences, userId, latitude, longitud
 };
 
 
-// router.post("/", rateLimit, async (req, res) => {
-//   try {
-//     const { lat, lon, user_id, preferences } = req.body;
-//     if (!lat || !lon || !user_id) {
-//       return res.status(400).json({ error: "Latitude, longitude, and user_id are required." });
-//     }
-    
-//     const latitude = parseFloat(lat);
-//     const longitude = parseFloat(lon);
-    
-//     // Parse user preferences if provided
-//     const userPrefs = preferences ? JSON.parse(preferences) : {};
-    
-//     // Determine area granularity based on location type
-//     // In dense urban areas, we use a smaller radius
-//     const isUrbanArea = await isUrbanLocation(latitude, longitude);
-//     const boxSize = isUrbanArea ? 0.15 : 0.45; // Smaller box for urban areas
-    
-//     // Step 1: Check if we already have experiences for this EXACT user
-//     const userExperiences = await Experience.find({
-//       user_id: user_id,
-//       "locations.lat": { $gte: latitude - boxSize, $lte: latitude + boxSize },
-//       "locations.lon": { $gte: longitude - boxSize, $lte: longitude + boxSize },
-//     });
-    
-//     // If this user already has experiences in the area, return them
-//     if (userExperiences.length > 0) {
-//       return res.json({experiences: userExperiences, source: "user_cache"});
-//     }
-    
-//     // Step 2: Check if we have seed experiences in the area that can be adapted
-//     const seedExperiences = await Experience.find({
-//       is_seed: true,
-//       "locations.lat": { $gte: latitude - boxSize, $lte: latitude + boxSize },
-//       "locations.lon": { $gte: longitude - boxSize, $lte: longitude + boxSize },
-//     }).sort({ times_shown: 1 }).limit(20); // Get least shown experiences first
-    
-//     // If we have seed experiences, customize some for this user
-//     if (seedExperiences.length >= 5) {
-//       // Update usage count for these experiences
-//       const experienceIds = seedExperiences.map(exp => exp._id);
-//       await Experience.updateMany(
-//         { _id: { $in: experienceIds } },
-//         { $inc: { times_shown: 1 } }
-//       );
-      
-//       // Filter and prioritize experiences for this specific user
-//       const filteredExperiences = filterExperiencesForUser(
-//         seedExperiences, 
-//         latitude, 
-//         longitude,
-//         userPrefs
-//       );
-      
-//       // Take top 10 most relevant experiences
-//       const selectedExperiences = filteredExperiences.slice(0, 10);
-      
-//       // Create clones for this user
-//       const userClones = selectedExperiences.map(exp => ({
-//         ...exp.toObject(),
-//         _id: undefined, // Let MongoDB create a new ID
-//         user_id: user_id,
-//         is_seed: false,
-//         source_experience_id: exp._id,
-//         created_at: new Date()
-//       }));
-      
-//       // Save user-specific clones
-//       await Experience.insertMany(userClones);
-      
-//       return res.json({
-//         experiences: userClones,
-//         source: "customized_from_seed"
-//       });
-//     }
-    
-//     // Step 3: Generate completely new experiences
-//     // Get nearby places
-//     let nearbyPlaces = await getNearbyPlaces(latitude, longitude);
-    
-//     // If not enough places found, search with larger radius
-//     if (nearbyPlaces.length < 5) {
-//       nearbyPlaces.push(...await getNearbyPlaces(latitude, longitude, 10000));
-//     }
-    
-//     // Add additional attractions from targeted searches
-//     const additionalAttractions = await searchForAdditionalAttractions(latitude, longitude);
-//     nearbyPlaces = [...nearbyPlaces, ...additionalAttractions];
-    
-//     // Remove duplicates based on placeId
-//     nearbyPlaces = Array.from(
-//       new Map(nearbyPlaces.map(item => [item.placeId, item])).values()
-//     );
-    
-//     if (nearbyPlaces.length === 0) {
-//       return res.status(404).json({ error: "No points of interest found" });
-//     }
-
-//     // Generate diverse experiences
-//     const generatedExperiences = await fetchGeminiExperiences(nearbyPlaces, latitude, longitude);
-//     if (!Array.isArray(generatedExperiences) || generatedExperiences.length === 0) {
-//       return res.status(500).json({ error: "Failed to generate tour experiences" });
-//     }
-
-//     // Format and save experiences
-//     const newExperiences = generatedExperiences.map(exp => ({
-//       title: exp.title,
-//       description: exp.description,
-//       locations: exp.locations.map(loc => ({
-//         lat: loc.lat,
-//         lon: loc.lon,
-//         locationName: loc.locationName,
-//         placeId: loc.placeId || null,
-//         types: loc.types || [],
-//         rating: loc.rating || null,
-//         vicinity: loc.vicinity || null,
-//         photos: loc.photos || [],
-//         narration: loc.narration || `Welcome to ${loc.locationName}, one of the must-visit spots in our tour.`
-//       })),
-//       user_id,
-//       is_seed: true,
-//       times_shown: 1,
-//       created_at: new Date(),
-//       location_center: {
-//         lat: latitude,
-//         lon: longitude
-//       }
-//     }));
-
-//     // Save experiences to database
-//     await Experience.insertMany(newExperiences);
-    
-//     // Create user-specific copies
-//     const userVersions = newExperiences.map(exp => ({
-//       ...exp,
-//       _id: undefined, // Let MongoDB create a new ID
-//       is_seed: false,
-//       source_experience_id: exp._id
-//     }));
-    
-//     await Experience.insertMany(userVersions);
-
-//     res.json({
-//       experiences: userVersions,
-//       source: "newly_generated"
-//     });
-//   } catch (error) {
-//     console.error("Error in experiences route:", error);
-//     res.status(500).json({ error: "Server error", details: error.message });
-//   }
-// });
-
 router.post("/", rateLimit, async (req, res) => {
   try {
     const { lat, lon, user_id, preferences } = req.body;
@@ -1047,6 +567,7 @@ router.post("/", rateLimit, async (req, res) => {
     const userPrefs = preferences ? JSON.parse(preferences) : {};
     
     // Determine area granularity based on location type
+    // In dense urban areas, we use a smaller radius
     const isUrbanArea = await isUrbanLocation(latitude, longitude);
     const boxSize = isUrbanArea ? 0.15 : 0.45; // Smaller box for urban areas
     
@@ -1078,7 +599,7 @@ router.post("/", rateLimit, async (req, res) => {
         { $inc: { times_shown: 1 } }
       );
       
-      // Filter and prioritize experiences for this specific user - improved filtering
+      // Filter and prioritize experiences for this specific user
       const filteredExperiences = filterExperiencesForUser(
         seedExperiences, 
         latitude, 
@@ -1086,8 +607,11 @@ router.post("/", rateLimit, async (req, res) => {
         userPrefs
       );
       
-      // Create clones for this user - limit to 10 most relevant experiences
-      const userClones = filteredExperiences.slice(0, 10).map(exp => ({
+      // Take top 10 most relevant experiences
+      const selectedExperiences = filteredExperiences.slice(0, 10);
+      
+      // Create clones for this user
+      const userClones = selectedExperiences.map(exp => ({
         ...exp.toObject(),
         _id: undefined, // Let MongoDB create a new ID
         user_id: user_id,
@@ -1097,14 +621,12 @@ router.post("/", rateLimit, async (req, res) => {
       }));
       
       // Save user-specific clones
-      if (userClones.length > 0) {
-        await Experience.insertMany(userClones);
-        
-        return res.json({
-          experiences: userClones,
-          source: "customized_from_seed"
-        });
-      }
+      await Experience.insertMany(userClones);
+      
+      return res.json({
+        experiences: userClones,
+        source: "customized_from_seed"
+      });
     }
     
     // Step 3: Generate completely new experiences
@@ -1129,17 +651,14 @@ router.post("/", rateLimit, async (req, res) => {
       return res.status(404).json({ error: "No points of interest found" });
     }
 
-    // Generate diverse experiences - improved location set generation
+    // Generate diverse experiences
     const generatedExperiences = await fetchGeminiExperiences(nearbyPlaces, latitude, longitude);
     if (!Array.isArray(generatedExperiences) || generatedExperiences.length === 0) {
       return res.status(500).json({ error: "Failed to generate tour experiences" });
     }
 
-    // CRITICAL IMPROVEMENT: Deduplicate the generated experiences
-    const dedupedExperiences = deduplicateExperiences(generatedExperiences);
-    
     // Format and save experiences
-    const newExperiences = dedupedExperiences.map(exp => ({
+    const newExperiences = generatedExperiences.map(exp => ({
       title: exp.title,
       description: exp.description,
       locations: exp.locations.map(loc => ({
@@ -1162,11 +681,6 @@ router.post("/", rateLimit, async (req, res) => {
         lon: longitude
       }
     }));
-
-    // Only save if we have experiences
-    if (newExperiences.length === 0) {
-      return res.status(500).json({ error: "Failed to generate unique tour experiences" });
-    }
 
     // Save experiences to database
     await Experience.insertMany(newExperiences);
