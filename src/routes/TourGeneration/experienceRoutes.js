@@ -58,7 +58,7 @@ const getLocationNameFromCoordinates = async (lat, lon) => {
 };
 
 // Enhanced to fetch and categorize places
-const getNearbyPlaces = async (lat, lon, radius = 20000) => {
+const getNearbyPlaces = async (lat, lon, radius = 5000) => {
   try {
     // Check cache first
     const cacheKey = placesCache.getKey(lat, lon, radius);
