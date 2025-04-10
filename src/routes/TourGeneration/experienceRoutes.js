@@ -1,655 +1,726 @@
+
+
 import express from "express";
 import axios from "axios";
-import mongoose from 'mongoose'; // Import mongoose for ObjectId validation
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import Experience from "../../models/experiences/Experience.js"; // Ensure path is correct
+import Experience from "../../models/experiences/Experience.js";
 
 const router = express.Router();
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// --- Initialization & Validation ---
-let genAI;
-if (process.env.GEMINI_API_KEY) {
-    genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-} else {
-    console.error("FATAL ERROR: GEMINI_API_KEY environment variable is missing.");
-    // Optionally exit or disable routes requiring Gemini
-    // process.exit(1);
-}
-if (!process.env.GOOGLE_PLACES_API_KEY) {
-    console.error("FATAL ERROR: GOOGLE_PLACES_API_KEY environment variable is missing.");
-    // process.exit(1);
-}
-
-
-// --- Cache (Simple In-Memory - Consider Redis/Memcached for Production) ---
+// Enhanced cache with categorization of attractions
 const placesCache = {
-  data: new Map(),
-  getKey: (lat, lon, radius, context = '') => `${lat.toFixed(4)},${lon.toFixed(4)},${radius},${context}`,
-  get: function(key) {
-    const entry = this.data.get(key);
-    if (entry && (Date.now() - entry.timestamp < 60 * 60 * 1000)) { // 1 hour validity
-        // console.log(`Cache hit for key: ${key}`);
-        return entry.data;
-    }
-    if (entry) { // Expired entry
-        // console.log(`Cache expired for key: ${key}`);
-        this.data.delete(key);
-    }
-    // console.log(`Cache miss for key: ${key}`);
-    return undefined;
+  attractions: new Map(),
+  getKey: (lat, lon, radius) => `${lat.toFixed(4)},${lon.toFixed(4)},${radius}`,
+  get: function(type, lat, lon, radius) {
+    const key = this.getKey(lat, lon, radius);
+    return this[type].get(key);
   },
-  set: function(key, data) {
-    this.data.set(key, { data, timestamp: Date.now() });
-  },
-  // Periodic cleanup for very old entries
-  cleanup: function() {
-      const now = Date.now();
-      const oneHour = 60 * 60 * 1000;
-      for (const [key, entry] of this.data.entries()) {
-          // Delete entries older than, say, 2 hours
-          if (now - entry.timestamp > 2 * oneHour) {
-              this.data.delete(key);
-          }
-      }
-       // console.log(`Cache cleanup finished. Size: ${this.data.size}`);
+  set: function(type, lat, lon, radius, data) {
+    const key = this.getKey(lat, lon, radius);
+    this[type].set(key, data);
+    // Set expiration (1 hour)
+    setTimeout(() => this[type].delete(key), 60 * 60 * 1000);
   }
 };
-// Run cleanup periodically (e.g., every 15 minutes)
-setInterval(() => placesCache.cleanup(), 15 * 60 * 1000);
 
-
-// --- Geocoding ---
+// Get location name from coordinates using reverse geocoding
 const getLocationNameFromCoordinates = async (lat, lon) => {
-  const cacheKey = placesCache.getKey(lat, lon, 0, 'geocode');
-  const cachedData = placesCache.get(cacheKey);
-  if (cachedData) return cachedData;
-
   try {
     const response = await axios.get(
       `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lon}&key=${process.env.GOOGLE_PLACES_API_KEY}`
     );
-    let locationName = 'this area'; // Default
+    
     if (response.data.results && response.data.results.length > 0) {
+      // Try to find locality (city) or administrative_area_level_1 (state/province)
       const addressComponents = response.data.results[0].address_components;
-      const locality = addressComponents.find(c => c.types.includes('locality'))?.long_name;
-      const adminArea = addressComponents.find(c => c.types.includes('administrative_area_level_1'))?.long_name;
-      const country = addressComponents.find(c => c.types.includes('country'))?.long_name;
-
-      locationName = locality || adminArea || country || 'this area';
-      if (locality && adminArea && locality !== adminArea) locationName = `${locality}, ${adminArea}`;
-      if (locationName !== country && country && !locationName.includes(country)) locationName = `${locationName}, ${country}`;
+      const locality = addressComponents.find(component => 
+        component.types.includes('locality')
+      );
+      
+      const adminArea = addressComponents.find(component => 
+        component.types.includes('administrative_area_level_1')
+      );
+      
+      const country = addressComponents.find(component => 
+        component.types.includes('country')
+      );
+      
+      // Return city, state/province, or country in that order of preference
+      return (locality?.long_name || adminArea?.long_name || country?.long_name || 'this area');
     }
-    placesCache.set(cacheKey, locationName);
-    return locationName;
+    
+    return 'this area'; // Default if we can't determine location
   } catch (error) {
     console.error("Failed to get location name:", error.message);
-    return 'this area'; // Return default on error
+    return 'this area';
   }
 };
 
-
-// --- Google Places API Calls ---
+// Enhanced to fetch and categorize places
 const getNearbyPlaces = async (lat, lon, radius = 20000) => {
-  const cacheKey = placesCache.getKey(lat, lon, radius, 'nearby');
-  const cachedData = placesCache.get(cacheKey);
-  if (cachedData) return cachedData;
-
-  console.log(`Workspaceing nearby places: ${lat}, ${lon}, Radius: ${radius}...`);
   try {
+    // Check cache first
+    const cacheKey = placesCache.getKey(lat, lon, radius);
+    const cachedData = placesCache.get('attractions', lat, lon, radius);
+    if (cachedData) return cachedData;
+
     const response = await axios.get(
-      `https://maps.googleapis.com/maps/api/place/nearbysearch/json`, {
-          params: {
-              location: `${lat},${lon}`,
-              radius: radius,
-              // Using keyword broadens search slightly vs type=tourist_attraction
-              keyword: 'tourist attraction|landmark|point of interest|park|museum|historical site',
-              // type: 'tourist_attraction', // Can use type if keyword is too broad
-              key: process.env.GOOGLE_PLACES_API_KEY
-          }
-      }
+      `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lon}&radius=${radius}&type=tourist_attraction&key=${process.env.GOOGLE_PLACES_API_KEY}`
     );
-    if (!response?.data?.results) {
-        console.error("Invalid response structure from Google Places API (Nearby Search)");
-        return [];
-    }
+    
     const places = response.data.results.map(place => ({
       locationName: place.name,
-      lat: place.geometry?.location?.lat,
-      lon: place.geometry?.location?.lng,
+      lat: place.geometry.location.lat,
+      lon: place.geometry.location.lng,
       placeId: place.place_id,
-      types: place.types || [],
-      rating: place.rating || null, // Keep as number or null
+      types: place.types,
+      rating: place.rating || "N/A",
       vicinity: place.vicinity || null
-    })).filter(p => p.lat != null && p.lon != null && p.placeId); // Ensure essential data exists
-
-    console.log(`Workspaceed ${places.length} nearby places.`);
-    placesCache.set(cacheKey, places);
+    }));
+    
+    // Cache the results
+    placesCache.set('attractions', lat, lon, radius, places);
     return places;
   } catch (error) {
-    console.error("Failed to fetch nearby places:", error.response?.data || error.message);
+    console.error("Failed to fetch nearby places:", error.message);
     return [];
   }
 };
 
-// This function might be redundant if getNearbyPlaces uses broad keywords.
-// Keep it if you specifically need types not covered well by keywords.
-/*
-const searchForAdditionalAttractions = async (lat, lon, radius = 15000) => {
-   // Add cache logic if needed
-  console.log(`Workspaceing additional attractions: ${lat}, ${lon}, Radius: ${radius}.`);
+// Function to search for additional types of attractions
+const searchForAdditionalAttractions = async (lat, lon) => {
   try {
+    // Check cache first
+    const cacheKey = placesCache.getKey(lat, lon, 15000);
+    const cachedData = placesCache.get('attractions', lat, lon, 15000);
+    if (cachedData) return cachedData;
+
+    // Perform a single search with multiple types to reduce API calls
     const response = await axios.get(
-      `https://maps.googleapis.com/maps/api/place/nearbysearch/json`, {
-          params: {
-            location: `${lat},${lon}`,
-            radius: radius,
-            type: 'museum|park|church|mosque|temple|zoo|aquarium|art_gallery|landmark|historical_landmark|natural_feature',
-            key: process.env.GOOGLE_PLACES_API_KEY
-          }
-      }
+      `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lon}&radius=15000&type=museum|park|church|mosque|temple|zoo|aquarium&key=${process.env.GOOGLE_PLACES_API_KEY}`
     );
-     if (!response?.data?.results) return [];
+    
     const attractions = response.data.results.map(place => ({
-      // ... map structure ...
-    })).filter(p => p.lat != null && p.lon != null && p.placeId);
-    console.log(`Workspaceed ${attractions.length} additional attractions.`);
-    // Add to cache if desired
+      locationName: place.name,
+      lat: place.geometry.location.lat,
+      lon: place.geometry.location.lng,
+      placeId: place.place_id,
+      types: place.types,
+      rating: place.rating || "N/A",
+      vicinity: place.vicinity || null
+    }));
+    
+    // Cache the results
+    placesCache.set('attractions', lat, lon, 15000, attractions);
     return attractions;
   } catch (error) {
-    console.error("Failed to fetch additional attractions:", error.response?.data || error.message);
+    console.error("Failed to fetch additional attractions:", error.message);
     return [];
   }
 };
-*/
 
-const getLocationPhotos = async (placeId) => {
-    if (!placeId) return [];
-    // Add cache check for photos if desired:
-    // const cacheKey = `photos_${placeId}`;
-    // const cachedPhotos = placesCache.get(cacheKey);
-    // if (cachedPhotos) return cachedPhotos;
-    try {
-        const response = await axios.get(
-            `https://maps.googleapis.com/maps/api/place/details/json`, {
-                params: {
-                    place_id: placeId,
-                    fields: 'photos',
-                    key: process.env.GOOGLE_PLACES_API_KEY
-                }
-            }
-        );
-        let photos = [];
-        if (response.data.result?.photos) {
-            photos = response.data.result.photos.slice(0, 3).map(photo =>
-                `https://maps.googleapis.com/maps/api/place/photo?maxwidth=600&photoreference=${photo.photo_reference}&key=${process.env.GOOGLE_PLACES_API_KEY}`
-            );
-        }
-        // placesCache.set(cacheKey, photos); // Cache result
-        return photos;
-    } catch (error) {
-        console.error(`Failed to fetch photos for placeId ${placeId}:`, error.response?.data || error.message);
-        return [];
-    }
-};
-
-
-// --- Experience Generation Helpers ---
-// (categorizeAttractions, getWeightedRandomSelection, generateDiverseLocationSets - Keep the latest versions from previous examples)
+// NEW: Helper to categorize attractions by type
 const categorizeAttractions = (attractions) => {
-    const categories = {
-        museums: [], historical: [], nature: [], entertainment: [],
-        religious: [], arts: [], shopping: [], neighborhoods: [],
-        landmarks: [], other: []
-    };
-    const addedPlaceIds = new Set();
+  const categories = {
+    museums: [],
+    historical: [],
+    nature: [],
+    entertainment: [],
+    religious: [],
+    arts: [],
+    shopping: [],
+    neighborhoods: [],
+    landmarks: [],
+    other: []
+  };
 
-    attractions.forEach(place => {
-        if (!place?.placeId || addedPlaceIds.has(place.placeId)) return;
-
-        const types = place.types || [];
-        let added = false;
-
-        if (types.includes('museum')) { categories.museums.push(place); added = true; }
-        else if (types.includes('park') || types.includes('natural_feature')) { categories.nature.push(place); added = true; }
-        else if (types.includes('church') || types.includes('mosque') || types.includes('hindu_temple') || types.includes('synagogue') || types.includes('place_of_worship')) { categories.religious.push(place); added = true; }
-        else if (types.includes('art_gallery') || types.includes('performing_arts_theater')) { categories.arts.push(place); added = true; }
-        else if (types.includes('amusement_park') || types.includes('zoo') || types.includes('aquarium')) { categories.entertainment.push(place); added = true; }
-        else if (types.includes('department_store') || types.includes('shopping_mall')) { categories.shopping.push(place); added = true; }
-        // Broadened historical/landmark/tourist attraction
-        else if (types.some(type => type.includes('historical') || type.includes('landmark') || type.includes('tourist_attraction'))) { categories.historical.push(place); added = true; }
-        else if (types.includes('neighborhood') || types.includes('sublocality')) { categories.neighborhoods.push(place); added = true; }
-        // Use 'point_of_interest' only if nothing else matched
-        else if (!added && types.includes('point_of_interest') ) { categories.landmarks.push(place); added = true; }
-
-        if (added) {
-            addedPlaceIds.add(place.placeId);
-        } else if (!categories.other.some(p => p.placeId === place.placeId)) {
-            // Only add to other if not categorized and not already in other
-             categories.other.push(place);
-             addedPlaceIds.add(place.placeId);
-        }
-    });
-    return categories;
-};
-
-const getWeightedRandomSelection = (items, count, weights = null) => {
-    if (!items || items.length === 0) return [];
-    const numToSelect = Math.min(count, items.length);
-    if (numToSelect === 0) return [];
-
-    const selected = [];
-    const availableItems = [...items];
-    let availableWeights = weights ? [...weights] : null;
-
-    for (let i = 0; i < numToSelect; i++) {
-        let index = -1;
-        if (availableWeights?.length === availableItems.length) {
-            const totalWeight = availableWeights.reduce((sum, w) => sum + (w > 0 ? w : 0), 0); // Sum positive weights
-            if (totalWeight <= 0) {
-                index = Math.floor(Math.random() * availableItems.length);
-            } else {
-                let random = Math.random() * totalWeight;
-                for (let j = 0; j < availableWeights.length; j++) {
-                    if (availableWeights[j] > 0) random -= availableWeights[j]; // Only subtract positive weights
-                    if (random <= 0) { index = j; break; }
-                }
-                if (index === -1) index = availableItems.length - 1; // Fallback if not set
-            }
-        } else {
-            index = Math.floor(Math.random() * availableItems.length);
-        }
-        selected.push(availableItems[index]);
-        availableItems.splice(index, 1);
-        if (availableWeights) availableWeights.splice(index, 1);
+  attractions.forEach(place => {
+    const types = place.types || [];
+    
+    // Categorize based on place types
+    if (types.includes('museum')) {
+      categories.museums.push(place);
+    } else if (types.includes('park') || types.includes('natural_feature')) {
+      categories.nature.push(place);
+    } else if (types.includes('church') || types.includes('mosque') || types.includes('temple') || types.includes('place_of_worship')) {
+      categories.religious.push(place);
+    } else if (types.includes('art_gallery') || types.includes('theater')) {
+      categories.arts.push(place);
+    } else if (types.includes('amusement_park') || types.includes('zoo') || types.includes('aquarium')) {
+      categories.entertainment.push(place);
+    } else if (types.includes('department_store') || types.includes('shopping_mall')) {
+      categories.shopping.push(place);
+    } else if (types.some(type => type.includes('historical') || type.includes('landmark'))) {
+      categories.historical.push(place);
+    } else if (types.includes('neighborhood') || types.includes('sublocality')) {
+      categories.neighborhoods.push(place);
+    } else if (types.includes('point_of_interest')) {
+      categories.landmarks.push(place);
+    } else {
+      categories.other.push(place);
     }
-    return selected;
+  });
+  
+  return categories;
 };
 
-const generateDiverseLocationSets = (attractions, userLat, userLon, numSets = 10, locationsPerSet = 4) => {
-  if (!attractions || attractions.length === 0) return [];
-  const categorized = categorizeAttractions(attractions);
-  attractions.forEach(p => {
-      p.distanceFromUser = Math.sqrt(Math.pow(p.lat - userLat, 2) + Math.pow(p.lon - userLon, 2));
-  });
-
-  const themeSets = [ /* Keep your theme definitions here */
-      ["Historical Highlights", ["historical", "landmarks", "museums"], 2],
-      ["Arts & Culture", ["museums", "arts", "historical", "neighborhoods"], 2],
-      ["Nature Escape", ["nature", "landmarks"], 2],
-      ["Religious & Spiritual", ["religious", "historical", "landmarks"], 2],
-      ["Family Fun", ["entertainment", "nature", "parks", "museums"], 2],
-      ["Local Vibe", ["neighborhoods", "shopping", "other"], 2],
-      ["Hidden Gems & Views", ["other", "landmarks", "nature"], 2],
-      ["Photography Hotspots", ["nature", "landmarks", "historical", "neighborhoods"], 2],
-      ["Cultural Immersion", ["museums", "arts", "neighborhoods", "historical"], 2],
-      ["Relax & Recharge", ["nature", "parks", "other"], 2]
-  ];
-
-  const locationSets = [];
-  const usedLocationCombinations = new Set();
-  const viableThemes = themeSets.filter(([theme, categoriesToUse]) => {
-      const distinctPlaces = new Set();
-      categoriesToUse.forEach(cat => categorized[cat]?.forEach(p => distinctPlaces.add(p.placeId)));
-      return distinctPlaces.size >= locationsPerSet;
-  });
-
-  if (viableThemes.length === 0) {
-      console.log("No themes have enough unique attractions.");
-      return [];
-  }
-
-  let attempts = 0;
-  const maxAttempts = numSets * 4; // Increase attempts further
-
-  while (locationSets.length < numSets && attempts < maxAttempts) {
-      attempts++;
-      const [theme, categoriesToUse] = viableThemes[Math.floor(Math.random() * viableThemes.length)];
-      const availableForThemeSet = new Map(); // Use Map for inherent uniqueness by placeId
-      categoriesToUse.forEach(cat => categorized[cat]?.forEach(p => availableForThemeSet.set(p.placeId, p)));
-      const availableForTheme = Array.from(availableForThemeSet.values());
-
-      if (availableForTheme.length < locationsPerSet) continue;
-
-      const weights = availableForTheme.map(p => 1 / (Math.pow(p.distanceFromUser, 2) + 0.0001));
-      const selectedLocations = getWeightedRandomSelection(availableForTheme, locationsPerSet, weights);
-
-      if (selectedLocations.length >= Math.min(locationsPerSet, 2)) {
-          const combinationKey = selectedLocations.map(loc => loc.placeId).sort().join(',');
-          if (combinationKey && !usedLocationCombinations.has(combinationKey)) {
-              locationSets.push({ theme, locations: selectedLocations });
-              usedLocationCombinations.add(combinationKey);
-          }
+// NEW: Function to get weighted random items from an array
+const getWeightedRandomSelection = (items, count, weights = null) => {
+  if (!items || items.length === 0) return [];
+  if (items.length <= count) return [...items];
+  
+  const selected = [];
+  const availableItems = [...items];
+  
+  for (let i = 0; i < count && availableItems.length > 0; i++) {
+    let index;
+    if (weights && weights.length === availableItems.length) {
+      // Weighted selection
+      const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+      let random = Math.random() * totalWeight;
+      for (index = 0; index < weights.length; index++) {
+        random -= weights[index];
+        if (random <= 0) break;
       }
+    } else {
+      // Random selection
+      index = Math.floor(Math.random() * availableItems.length);
+    }
+    
+    selected.push(availableItems[index]);
+    availableItems.splice(index, 1);
+    if (weights) weights.splice(index, 1);
   }
-  console.log(`Generated ${locationSets.length} unique location sets.`);
+  
+  return selected;
+};
+
+// NEW: Function to generate diverse location sets
+const generateDiverseLocationSets = (attractions, userLat, userLon, numSets = 10, locationsPerSet = 4) => {
+  // Categorize all attractions
+  const categorized = categorizeAttractions(attractions);
+  
+  // Calculate distance from user to each attraction
+  attractions.forEach(place => {
+    place.distanceFromUser = Math.sqrt(
+      Math.pow(place.lat - userLat, 2) + Math.pow(place.lon - userLon, 2)
+    );
+  });
+  
+  // Prepare diverse theme sets
+  const themeSets = [
+    // Format: [Theme name, [categories to sample from], min items per category]
+    ["Historical Highlights", ["historical", "landmarks"], 2],
+    ["Arts & Culture", ["museums", "arts", "historical"], 2],
+    ["Nature Escape", ["nature", "landmarks"], 2],
+    ["Religious Heritage", ["religious", "historical"], 2],
+    ["Family Fun", ["entertainment", "nature", "landmarks"], 2],
+    ["Local Neighborhoods", ["neighborhoods", "shopping", "landmarks"], 2],
+    ["Hidden Gems", ["other", "landmarks", "neighborhoods"], 2],
+    ["Architectural Marvels", ["historical", "religious", "landmarks"], 2],
+    ["Photography Spots", ["nature", "landmarks", "historical"], 2],
+    ["Cultural Immersion", ["museums", "arts", "neighborhoods"], 2]
+  ];
+  
+  // Generate diverse location sets
+  const locationSets = [];
+  for (let i = 0; i < numSets && i < themeSets.length; i++) {
+    const [theme, categoriesToUse, minPerCategory] = themeSets[i];
+    
+    // Gather all available attractions for this theme
+    let availableForTheme = [];
+    categoriesToUse.forEach(category => {
+      if (categorized[category] && categorized[category].length > 0) {
+        availableForTheme = [...availableForTheme, ...categorized[category]];
+      }
+    });
+    
+    // Remove duplicates (same place might be in multiple categories)
+    availableForTheme = Array.from(
+      new Map(availableForTheme.map(item => [item.placeId, item])).values()
+    );
+    
+    // Apply proximity weighting (favor closer places)
+    const weights = availableForTheme.map(place => 
+      1 / (place.distanceFromUser + 0.01) // Add small value to avoid division by zero
+    );
+    
+    // Get unique locations for this set
+    const selectedLocations = getWeightedRandomSelection(
+      availableForTheme, 
+      locationsPerSet,
+      weights
+    );
+    
+    // If we have enough locations, add this set
+    if (selectedLocations.length >= 2) {
+      locationSets.push({
+        theme,
+        locations: selectedLocations
+      });
+    }
+  }
+  
   return locationSets;
 };
 
-
-// --- Gemini API Call ---
+// Modified to generate diverse experiences and fetch location photos
 const fetchGeminiExperiences = async (nearbyPlaces, latitude, longitude) => {
-    if (!genAI) {
-        console.error("Gemini AI client not initialized (Missing API Key?). Cannot fetch experiences.");
-        return [];
+  try {
+    // Get location name for the prompt
+    const locationName = await getLocationNameFromCoordinates(latitude, longitude);
+    
+    // Generate diverse location sets
+    const diverseLocationSets = generateDiverseLocationSets(nearbyPlaces, latitude, longitude);
+    
+    if (diverseLocationSets.length === 0) {
+      console.error("Failed to generate diverse location sets");
+      return [];
     }
-    try {
-        const locationName = await getLocationNameFromCoordinates(latitude, longitude);
-        const diverseLocationSets = generateDiverseLocationSets(nearbyPlaces, latitude, longitude);
-
-        if (!diverseLocationSets?.length) {
-            console.error("Failed to generate diverse location sets.");
-            return [];
+    
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-1.5-flash",
+      safetySettings: [
+        {
+          category: "HARM_CATEGORY_HARASSMENT",
+          threshold: "BLOCK_MEDIUM_AND_ABOVE"
+        },
+        {
+          category: "HARM_CATEGORY_HATE_SPEECH",
+          threshold: "BLOCK_MEDIUM_AND_ABOVE"
+        },
+        {
+          category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+          threshold: "BLOCK_MEDIUM_AND_ABOVE"
+        },
+        {
+          category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+          threshold: "BLOCK_MEDIUM_AND_ABOVE"
         }
-        console.log(`Generated ${diverseLocationSets.length} diverse location sets to attempt.`);
+      ],
+      generationConfig: {
+        temperature: 0.7,
+        topP: 0.8,
+        topK: 40,
+        maxOutputTokens: 8192
+      }
+    });
+    
 
-        const modelConfig = { /* Keep your model config */
-            model: "gemini-1.5-flash",
-            safetySettings: [ /* ... */ ],
-            generationConfig: { /* ... */ }
-        };
-        console.log("Initializing model with config:", JSON.stringify(modelConfig.model)); // Log only model name
-        const model = genAI.getGenerativeModel(modelConfig);
+    // We'll generate experiences for each theme separately to keep memory usage manageable
+    const generatedExperiences = [];
+    
+    for (let i = 0; i < diverseLocationSets.length; i++) {
+      const locationSet = diverseLocationSets[i];
+      
+      // Skip if not enough locations
+      if (!locationSet.locations || locationSet.locations.length < 2) continue;
+      
+      // Create a custom prompt for this specific theme and locations
+      const themePrompt = `
+You are a passionate and highly knowledgeable local tour guide from ${locationName} with decades of experience. 
+Your mission is to craft a single immersive, one-of-a-kind tour experience with the theme "${locationSet.theme}".
 
-        const generatedExperiencesRaw = [];
-        const generatedLocationKeys = new Set();
-        const promises = [];
+For EACH of the following REAL locations, provide a rich, detailed 300-500 word narration in first-person as if you're standing there with travelers:
+${locationSet.locations.map(loc => `- ${loc.locationName}`).join('\n')}
 
-        for (const locationSet of diverseLocationSets) { // Use for...of
-             if (!locationSet?.locations || locationSet.locations.length < 2) continue;
+Your narration for each location MUST include:
+- A warm welcome and orientation to the location
+- Vivid sensory descriptions (sights, sounds, smells, textures)
+- Fascinating historical context with specific dates, names, and events
+- Personal anecdotes and observations as a local guide
+- Cultural significance and how locals interact with this place
+- Hidden details most tourists miss
+- Practical tips (best photo spots, quieter areas, accessibility notes)
+- 2-3 specific questions you might ask visitors to engage them
+- Connections to other locations in the tour
+- A compelling transition to the next location
 
-             const potentialKey = locationSet.locations.map(loc => loc.placeId).filter(Boolean).sort().join(',');
-             if (!potentialKey || generatedLocationKeys.has(potentialKey)) continue;
+Format your response as a JSON object, following this structure EXACTLY:
+{
+  "title": "An engaging title for your '${locationSet.theme}' themed tour",
+  "description": "Overall tour description connecting these specific locations",
+  "locations": [
+    {
+      "locationName": "${locationSet.locations[0].locationName}",
+      "lat": ${locationSet.locations[0].lat},
+      "lon": ${locationSet.locations[0].lon},
+      "narration": "Your detailed 300-500 word narration here...",
+      "photos": ["URL1","URL2"]
+    },
+    ... (continue for all provided locations)
+  ]
+}
 
-             const themePrompt = `...`; // Keep your detailed prompt structure from before
+Return ONLY the JSON object with no additional text or explanations.
+`;
 
-             promises.push(
-                 (async () => {
-                     try {
-                         // console.log(`Starting generation for theme: "${locationSet.theme}"`);
-                         const result = await model.generateContent(/* ... */); // Pass prompt
-
-                         const responseText = result.response?.candidates?.[0]?.content?.parts?.[0]?.text;
-                         if (!responseText) throw new Error("Invalid response structure from Gemini.");
-
-                         let cleanedResponse = responseText.trim().replace(/^```json\s*|\s*```$/g, "").trim();
-                         const experience = JSON.parse(cleanedResponse);
-
-                         // Enhancement and Photo Fetching Logic (Keep the parallel version from previous examples)
-                         const photoPromises = [];
-                         const enhancedLocations = experience.locations.map(locFromJson => {
-                             const matchingPlace = locationSet.locations.find(p => p.locationName.toLowerCase() === locFromJson.locationName.toLowerCase());
-                             if (matchingPlace?.placeId) {
-                                 photoPromises.push(getLocationPhotos(matchingPlace.placeId).then(photos => ({ placeId: matchingPlace.placeId, photos })));
-                                 return { /* ... return enhanced location structure ... */
-                                    ...locFromJson,
-                                    lat: matchingPlace.lat, lon: matchingPlace.lon, placeId: matchingPlace.placeId,
-                                    types: matchingPlace.types || [], rating: matchingPlace.rating || null,
-                                    vicinity: matchingPlace.vicinity || null, photos: []
-                                 };
-                             }
-                             console.warn(`Could not find matching placeId for location: "${locFromJson.locationName}"`);
-                             return { ...locFromJson, photos: [] };
-                         });
-                         const photoResults = await Promise.all(photoPromises);
-                         const photoMap = new Map(photoResults.map(p => [p.placeId, p.photos]));
-                         enhancedLocations.forEach(loc => { if (loc.placeId) loc.photos = photoMap.get(loc.placeId) || []; });
-
-                         const finalKey = enhancedLocations.map(loc => loc.placeId).filter(Boolean).sort().join(',');
-                         if (finalKey) {
-                             return { key: finalKey, experienceData: { ...experience, locations: enhancedLocations }, theme: locationSet.theme };
-                         }
-                         return null;
-                     } catch (error) {
-                         console.error(`Error processing experience theme "${locationSet.theme}":`, error.message);
-                         return null;
-                     }
-                 })()
-             );
-        } // End for...of loop
-
-        const results = await Promise.allSettled(promises);
-        results.forEach(result => {
-            if (result.status === 'fulfilled' && result.value) {
-                const { key, experienceData, theme } = result.value;
-                if (!generatedLocationKeys.has(key)) {
-                    generatedExperiencesRaw.push(experienceData);
-                    generatedLocationKeys.add(key);
-                    // console.log(`Successfully processed theme: "${theme}", key: ${key}`);
-                }
-            } else if (result.status === 'rejected') {
-                 console.error("A generation promise rejected:", result.reason);
-             }
+      try {
+        const result = await model.generateContent({
+          contents: [{ role: "user", parts: [{ text: themePrompt }] }],
         });
 
-        console.log(`Finished generation. Total unique experiences: ${generatedExperiencesRaw.length}`);
-        return generatedExperiencesRaw;
-    } catch (error) {
-        console.error("Critical Error in fetchGeminiExperiences:", error);
-        return [];
+        const responseText = result.response.candidates[0].content.parts[0].text;
+        
+        // Clean up the response text to remove markdown code blocks
+        let cleanedResponse = responseText;
+        if (responseText.trim().startsWith("```") && responseText.includes("```")) {
+          cleanedResponse = responseText.replace(/```json\s*|\s*```/g, "");
+        }
+
+        // Parse the JSON response
+        const experience = JSON.parse(cleanedResponse);
+        
+        // Add placeIds to locations where available
+        const enhancedLocations = await Promise.all(experience.locations.map(async location => {
+          // Try to find a match in the nearbyPlaces array
+          const matchingPlace = locationSet.locations.find(place => 
+            place.locationName.toLowerCase() === location.locationName.toLowerCase() ||
+            place.locationName.toLowerCase().includes(location.locationName.toLowerCase()) ||
+            location.locationName.toLowerCase().includes(place.locationName.toLowerCase())
+          );
+          
+          // If a match is found, use the more accurate info
+          if (matchingPlace) {
+            const photos = await getLocationPhotos(matchingPlace.placeId);
+            return {
+              ...location,
+              lat: matchingPlace.lat,
+              lon: matchingPlace.lon,
+              placeId: matchingPlace.placeId,
+              types: matchingPlace.types || [],
+              rating: matchingPlace.rating || null,
+              vicinity: matchingPlace.vicinity || null,
+              photos: photos || []
+            };
+          }
+          
+          return location;
+        }));
+        
+        // Add the enhanced experience
+        generatedExperiences.push({
+          ...experience,
+          locations: enhancedLocations
+        });
+      } catch (error) {
+        console.error(`Error generating experience for theme ${locationSet.theme}:`, error);
+        // Continue with other themes if one fails
+      }
     }
+
+    return generatedExperiences;
+  } catch (error) {
+    console.error("Gemini API request failed:", error);
+    if (error instanceof SyntaxError) {
+      console.error("JSON parsing error. Raw response was likely not valid JSON");
+    }
+    return [];
+  }
+};
+
+// NEW: Function to get photos for a location
+const getLocationPhotos = async (placeId) => {
+  if (!placeId) return [];
+  
+  try {
+    const response = await axios.get(
+      `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=photos&key=${process.env.GOOGLE_PLACES_API_KEY}`
+    );
+    
+    if (response.data.result && response.data.result.photos) {
+      return response.data.result.photos.slice(0, 3).map(photo => {
+        return `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference=${photo.photo_reference}&key=${process.env.GOOGLE_PLACES_API_KEY}`;
+      });
+    }
+    
+    return [];
+  } catch (error) {
+    console.error("Failed to fetch location photos:", error.message);
+    return [];
+  }
+};
+
+// Implement rate limiting middleware
+const rateLimiter = {
+  requests: new Map(),
+  limit: 60, // 60 requests per minute
+  reset: 60 * 1000, // 1 minute
+  check: function(ip) {
+    const now = Date.now();
+    if (!this.requests.has(ip)) {
+      this.requests.set(ip, { count: 1, resetTime: now + this.reset });
+      return true;
+    }
+    
+    const request = this.requests.get(ip);
+    if (now > request.resetTime) {
+      this.requests.set(ip, { count: 1, resetTime: now + this.reset });
+      return true;
+    }
+    
+    if (request.count >= this.limit) {
+      return false;
+    }
+    
+    request.count++;
+    return true;
+  }
+};
+
+// Rate limiting middleware
+const rateLimit = (req, res, next) => {
+  const ip = req.ip;
+  if (!rateLimiter.check(ip)) {
+    return res.status(429).json({ error: "Too many requests, please try again later." });
+  }
+  next();
+};
+
+// NEW: Helper to filter out experiences that don't match user preferences
+const filterExperiencesForUser = (experiences, userLat, userLon, params = {}) => {
+  // Calculate diversity score based on how many experiences share same locations
+  const locationCounts = new Map();
+  let totalLocations = 0;
+  
+  experiences.forEach(exp => {
+    exp.locations.forEach(loc => {
+      const locKey = `${loc.lat.toFixed(5)},${loc.lon.toFixed(5)}`;
+      locationCounts.set(locKey, (locationCounts.get(locKey) || 0) + 1);
+      totalLocations++;
+    });
+  });
+  
+  // Calculate average location occurrence
+  const avgOccurrence = totalLocations / Math.max(1, locationCounts.size);
+  
+  // Score experiences based on location diversity and proximity to user
+  experiences.forEach(exp => {
+    // Base score starts at 50
+    let score = 50;
+    
+    // Diversity score - lower is better (less overlap with other experiences)
+    let diversityScore = 0;
+    exp.locations.forEach(loc => {
+      const locKey = `${loc.lat.toFixed(5)},${loc.lon.toFixed(5)}`;
+      diversityScore += locationCounts.get(locKey) / avgOccurrence;
+    });
+    diversityScore = diversityScore / exp.locations.length;
+    
+    // Lower score for experiences with many duplicate locations
+    score -= (diversityScore - 1) * 15;
+    
+    // Proximity score - higher for locations closer to user
+    let proximityScore = 0;
+    exp.locations.forEach(loc => {
+      const distance = Math.sqrt(Math.pow(loc.lat - userLat, 2) + Math.pow(loc.lon - userLon, 2));
+      // Convert to a 0-10 score where 10 is closest
+      proximityScore += Math.max(0, 10 - (distance * 500));
+    });
+    proximityScore = proximityScore / exp.locations.length;
+    
+    // Add proximity bonus
+    score += proximityScore * 2;
+    
+    // Store the score with the experience
+    exp.relevanceScore = Math.round(score);
+  });
+  
+  // Sort by relevance score and return the top ones
+  return experiences.sort((a, b) => b.relevanceScore - a.relevanceScore);
+};
+
+// NEW: Function to save experiences with a storage strategy
+const saveExperiencesToDatabase = async (experiences, userId, latitude, longitude) => {
+  // Add strategic metadata to experiences
+  const enhancedExperiences = experiences.map(exp => ({
+    ...exp,
+    user_id: userId,
+    created_at: new Date(),
+    location_center: {
+      lat: latitude,
+      lon: longitude
+    },
+    // This is a reuse flag that indicates these are seed experiences that can be shown to other users
+    is_seed: true,
+    times_shown: 0
+  }));
+  
+  // Save to database
+  await Experience.insertMany(enhancedExperiences);
+  return enhancedExperiences;
 };
 
 
-// --- Rate Limiting ---
-// (Keep the rateLimiter object and rateLimit middleware function from the previous full example)
-const rateLimiter = { /* ... */ };
-const rateLimit = (req, res, next) => { /* ... */ };
-
-
-// --- Filtering & Scoring ---
-// (Keep the filterExperiencesForUser function from the previous full example)
-const filterExperiencesForUser = (experiences, userLat, userLon, userPrefs = {}) => { /* ... */ };
-
-
-// --- Urban Location Check ---
-// (Keep the isUrbanLocation function from the previous full example)
-async function isUrbanLocation(lat, lon) { /* ... */ }
-
-
-// --- Main Route Handler ---
 router.post("/", rateLimit, async (req, res) => {
   try {
     const { lat, lon, user_id, preferences } = req.body;
-
-    // --- Input Validation ---
-    if (lat == null || lon == null || !user_id) {
+    if (!lat || !lon || !user_id) {
       return res.status(400).json({ error: "Latitude, longitude, and user_id are required." });
     }
+    
     const latitude = parseFloat(lat);
     const longitude = parseFloat(lon);
-    if (isNaN(latitude) || isNaN(longitude)) {
-         return res.status(400).json({ error: "Invalid latitude or longitude format." });
-    }
-    // Validate user_id format (crucial for ObjectId casting)
-    if (!mongoose.Types.ObjectId.isValid(user_id)) {
-        console.error(`Invalid user_id format received: ${user_id}`);
-        return res.status(400).json({ error: "Invalid user ID format." });
-    }
-    let userPrefs = {};
-    if (preferences) {
-        try { userPrefs = typeof preferences === 'string' ? JSON.parse(preferences) : preferences; }
-        catch (e) { console.warn("Could not parse user preferences JSON:", preferences); }
-    }
-    console.log(`Request received for lat: ${latitude}, lon: ${longitude}, user: ${user_id}`);
-
-    // --- Determine Search Area ---
-    const isUrban = await isUrbanLocation(latitude, longitude);
-    const boxSize = isUrban ? 0.10 : 0.30;
-    const searchRadius = isUrban ? 10000 : 25000;
-    console.log(`Location: ${isUrban ? 'Urban' : 'Rural'}. Box: ${boxSize}, Radius: ${searchRadius}`);
-
-    // --- Step 1: Check User's Existing Experiences (using location_center) ---
-    const userCheckStartTime = Date.now();
-    // Ensure you have a 2dsphere index on location_center for this query
+    
+    // Parse user preferences if provided
+    const userPrefs = preferences ? JSON.parse(preferences) : {};
+    
+    // Determine area granularity based on location type
+    // In dense urban areas, we use a smaller radius
+    const isUrbanArea = await isUrbanLocation(latitude, longitude);
+    const boxSize = isUrbanArea ? 0.15 : 0.45; // Smaller box for urban areas
+    
+    // Step 1: Check if we already have experiences for this EXACT user
     const userExperiences = await Experience.find({
-        user_id: user_id, // Match the specific user
-        location_center: {
-            $geoWithin: {
-                // Use $centerSphere for distance-based query (meters)
-                $centerSphere: [ [longitude, latitude], searchRadius / 6378100 ] // radius in radians (radius_meters / earth_radius_meters)
-                // OR use $box for bounding box query (degrees)
-                // $box: [ [longitude - boxSize, latitude - boxSize], [longitude + boxSize, latitude + boxSize] ]
-            }
-        }
-    }).limit(20); // Check a reasonable number
-    console.log(`User experience check took ${Date.now() - userCheckStartTime}ms. Found: ${userExperiences.length}`);
-
+      user_id: user_id,
+      "locations.lat": { $gte: latitude - boxSize, $lte: latitude + boxSize },
+      "locations.lon": { $gte: longitude - boxSize, $lte: longitude + boxSize },
+    });
+    
+    // If this user already has experiences in the area, return them
     if (userExperiences.length > 0) {
-       const filteredUserExperiences = filterExperiencesForUser(userExperiences, latitude, longitude, userPrefs).slice(0, 10);
-       if (filteredUserExperiences.length > 0) {
-            console.log(`Returning ${filteredUserExperiences.length} existing experiences for user ${user_id}.`);
-            return res.json({ experiences: filteredUserExperiences, source: "user_cache" });
-       } else {
-           console.log("Existing user experiences found but filtered out by preferences.");
-       }
-    } else {
-        console.log(`No existing user experiences found for user ${user_id} in this area.`);
+      return res.json({experiences: userExperiences, source: "user_cache"});
     }
-
-    // --- Step 2: Check Seed Experiences ---
-    const seedCheckStartTime = Date.now();
+    
+    // Step 2: Check if we have seed experiences in the area that can be adapted
     const seedExperiences = await Experience.find({
-        is_seed: true,
-        location_center: { // Use the same geo query as user check
-            $geoWithin: { $centerSphere: [ [longitude, latitude], searchRadius / 6378100 ] }
-        }
-    }).sort({ times_shown: 1 }).limit(30); // Get least shown seeds
-    console.log(`Seed check took ${Date.now() - seedCheckStartTime}ms. Found: ${seedExperiences.length}`);
-
-
+      is_seed: true,
+      "locations.lat": { $gte: latitude - boxSize, $lte: latitude + boxSize },
+      "locations.lon": { $gte: longitude - boxSize, $lte: longitude + boxSize },
+    }).sort({ times_shown: 1 }).limit(20); // Get least shown experiences first
+    
+    // If we have seed experiences, customize some for this user
     if (seedExperiences.length >= 5) {
-        console.log(`Found ${seedExperiences.length} seeds. Customizing...`);
-        // Update usage count async
-        Experience.updateMany({ _id: { $in: seedExperiences.map(e => e._id) } }, { $inc: { times_shown: 1 } })
-                  .catch(err => console.error("Error updating seed times_shown:", err));
-
-        const filteredSeedExperiences = filterExperiencesForUser(seedExperiences, latitude, longitude, userPrefs);
-        const selectedExperiences = filteredSeedExperiences.slice(0, 7);
-
-        const userClones = selectedExperiences.map(exp => {
-             if (!exp?._id) return null;
-             return {
-                ...exp.toObject(),
-                _id: undefined, user_id: user_id, is_seed: false,
-                source_experience_id: exp._id, times_shown: 0,
-                // No need for created_at, timestamps: true handles it
-             };
-        }).filter(Boolean);
-
-        if (userClones.length > 0) {
-            try {
-                console.log(`Attempting to save ${userClones.length} customized clones...`);
-                const savedClones = await Experience.insertMany(userClones, { ordered: false });
-                console.log(`Successfully saved ${savedClones?.length ?? 0} customized clones.`);
-                 if (savedClones?.length > 0) {
-                    // Return the actual saved clones (they now have _id)
-                    return res.json({ experiences: savedClones, source: "customized_from_seed" });
-                 }
-            } catch (dbError) { console.error("!!! DB Error saving customized clones:", dbError); }
-        } else { console.log("No suitable seeds left after filtering."); }
-    } else { console.log("Not enough seeds found."); }
-
-
-    // --- Step 3: Generate New Experiences ---
-    console.log("Generating new experiences...");
-    const placesStartTime = Date.now();
-    let nearbyPlaces = await getNearbyPlaces(latitude, longitude, searchRadius);
-    // let additionalAttractions = await searchForAdditionalAttractions(latitude, longitude, searchRadius); // Optionally add back
-    const placeMap = new Map();
-    nearbyPlaces.forEach(p => { if(p.placeId) placeMap.set(p.placeId, p) });
-    // [...additionalAttractions].forEach(p => { if(p.placeId) placeMap.set(p.placeId, p) }); // Add if using additional
-    const uniqueNearbyPlaces = Array.from(placeMap.values());
-    console.log(`Place fetching & deduplication took ${Date.now() - placesStartTime}ms. Unique places: ${uniqueNearbyPlaces.length}`);
-
-
-    if (uniqueNearbyPlaces.length < 4) {
-        return res.status(404).json({ error: "Could not find enough points of interest nearby." });
+      // Update usage count for these experiences
+      const experienceIds = seedExperiences.map(exp => exp._id);
+      await Experience.updateMany(
+        { _id: { $in: experienceIds } },
+        { $inc: { times_shown: 1 } }
+      );
+      
+      // Filter and prioritize experiences for this specific user
+      const filteredExperiences = filterExperiencesForUser(
+        seedExperiences, 
+        latitude, 
+        longitude,
+        userPrefs
+      );
+      
+      // Take top 10 most relevant experiences
+      const selectedExperiences = filteredExperiences.slice(0, 10);
+      
+      // Create clones for this user
+      const userClones = selectedExperiences.map(exp => ({
+        ...exp.toObject(),
+        _id: undefined, // Let MongoDB create a new ID
+        user_id: user_id,
+        is_seed: false,
+        source_experience_id: exp._id,
+        created_at: new Date()
+      }));
+      
+      // Save user-specific clones
+      await Experience.insertMany(userClones);
+      
+      return res.json({
+        experiences: userClones,
+        source: "customized_from_seed"
+      });
+    }
+    
+    // Step 3: Generate completely new experiences
+    // Get nearby places
+    let nearbyPlaces = await getNearbyPlaces(latitude, longitude);
+    
+    // If not enough places found, search with larger radius
+    if (nearbyPlaces.length < 5) {
+      nearbyPlaces.push(...await getNearbyPlaces(latitude, longitude, 10000));
+    }
+    
+    // Add additional attractions from targeted searches
+    const additionalAttractions = await searchForAdditionalAttractions(latitude, longitude);
+    nearbyPlaces = [...nearbyPlaces, ...additionalAttractions];
+    
+    // Remove duplicates based on placeId
+    nearbyPlaces = Array.from(
+      new Map(nearbyPlaces.map(item => [item.placeId, item])).values()
+    );
+    
+    if (nearbyPlaces.length === 0) {
+      return res.status(404).json({ error: "No points of interest found" });
     }
 
-    const generationStartTime = Date.now();
-    const generatedExperiences = await fetchGeminiExperiences(uniqueNearbyPlaces, latitude, longitude);
-    console.log(`Gemini generation took ${Date.now() - generationStartTime}ms.`);
-
-
-    if (!generatedExperiences?.length) {
-        return res.status(500).json({ error: "Failed to generate tour experiences." });
-    }
-    console.log(`Received ${generatedExperiences.length} raw experiences from generation.`);
-
-    // --- Format and Save Newly Generated Experiences ---
-    const newExperiencesToSave = generatedExperiences.map(exp => ({
-        title: exp.title,
-        description: exp.description,
-        locations: exp.locations.map(loc => ({
-            lat: loc.lat, lon: loc.lon, locationName: loc.locationName,
-            placeId: loc.placeId || null, types: loc.types || [],
-            rating: (typeof loc.rating === 'number') ? loc.rating : null, // Align with schema
-            vicinity: loc.vicinity || null, photos: loc.photos || [],
-            narration: loc.narration || `Welcome to ${loc.locationName}.`
-        })).filter(loc => loc.lat != null && loc.lon != null),
-        user_id: user_id, // Associate with triggering user initially
-        is_seed: true,    // Mark as seed
-        times_shown: 0,
-        // REMOVED created_at (handled by timestamps: true)
-        location_center: { // Use GeoJSON Point format
-             type: 'Point',
-             coordinates: [longitude, latitude] // LON, LAT order
-        }
-    })).filter(exp => exp.locations.length >= 2); // Filter experiences with too few locations
-
-    if (newExperiencesToSave.length === 0) {
-         console.log("WARNING: No valid experiences formatted for saving.");
-         return res.status(500).json({ error: "Failed to format generated experiences for saving." });
-     }
-
-    // --- Save Seeds ---
-    let savedSeeds = [];
-    try {
-        // Log first object structure before insert
-        console.log("Structure of first new seed:", JSON.stringify(newExperiencesToSave[0], null, 2));
-        console.log(`Attempting to save ${newExperiencesToSave.length} new seed experiences...`);
-        savedSeeds = await Experience.insertMany(newExperiencesToSave, { ordered: false });
-        console.log(`Saved ${savedSeeds?.length ?? 0} new seeds.`);
-        if (savedSeeds?.length !== newExperiencesToSave.length) {
-            console.warn(`Expected ${newExperiencesToSave.length} seeds saved, but got ${savedSeeds?.length ?? 0}.`);
-        }
-    } catch (dbError) {
-        console.error("!!! DB Error saving NEW SEEDS:", dbError);
-        return res.status(500).json({ error: "Database error saving new experiences", details: dbError.message });
+    // Generate diverse experiences
+    const generatedExperiences = await fetchGeminiExperiences(nearbyPlaces, latitude, longitude);
+    if (!Array.isArray(generatedExperiences) || generatedExperiences.length === 0) {
+      return res.status(500).json({ error: "Failed to generate tour experiences" });
     }
 
-    // --- Create User Clones from Newly Saved Seeds ---
-     let userVersions = [];
-     if (savedSeeds?.length > 0) {
-         userVersions = savedSeeds.map(exp => {
-             if (!exp?._id) return null;
-             return {
-                 ...exp.toObject(), _id: undefined, is_seed: false,
-                 source_experience_id: exp._id, user_id: user_id, times_shown: 0
-             };
-         }).filter(Boolean);
+    // Format and save experiences
+    const newExperiences = generatedExperiences.map(exp => ({
+      title: exp.title,
+      description: exp.description,
+      locations: exp.locations.map(loc => ({
+        lat: loc.lat,
+        lon: loc.lon,
+        locationName: loc.locationName,
+        placeId: loc.placeId || null,
+        types: loc.types || [],
+        rating: loc.rating || null,
+        vicinity: loc.vicinity || null,
+        photos: loc.photos || [],
+        narration: loc.narration || `Welcome to ${loc.locationName}, one of the must-visit spots in our tour.`
+      })),
+      user_id,
+      is_seed: true,
+      times_shown: 1,
+      created_at: new Date(),
+      location_center: {
+        lat: latitude,
+        lon: longitude
+      }
+    }));
 
-         if (userVersions.length > 0) {
-             try {
-                 console.log(`Attempting to save ${userVersions.length} user clones from new seeds...`);
-                 const savedUserClones = await Experience.insertMany(userVersions, { ordered: false });
-                 console.log(`Successfully saved ${savedUserClones?.length ?? 0} user clones.`);
-                 // Important: Use the actual saved clones for the response, as they now have _ids
-                 userVersions = savedUserClones;
-             } catch (dbError) { console.error("!!! DB Error saving user clones from new seeds:", dbError); }
-         } else { console.log("No valid user versions generated from new seeds."); }
-     } else { console.log("Skipping clone creation, no new seeds saved."); }
+    // Save experiences to database
+    await Experience.insertMany(newExperiences);
+    
+    // Create user-specific copies
+    const userVersions = newExperiences.map(exp => ({
+      ...exp,
+      _id: undefined, // Let MongoDB create a new ID
+      is_seed: false,
+      source_experience_id: exp._id
+    }));
+    
+    await Experience.insertMany(userVersions);
 
-    // --- Return Response ---
-    const finalUserExperiences = filterExperiencesForUser(userVersions, latitude, longitude, userPrefs).slice(0, 7);
-    console.log(`Returning ${finalUserExperiences.length} newly generated experiences to user.`);
-    res.json({ experiences: finalUserExperiences, source: "newly_generated" });
-
+    res.json({
+      experiences: userVersions,
+      source: "newly_generated"
+    });
   } catch (error) {
-    console.error("!!! Unhandled Error in experiences route:", error);
-    res.status(500).json({ error: "Server error processing request.", details: error.message });
+    console.error("Error in experiences route:", error);
+    res.status(500).json({ error: "Server error", details: error.message });
   }
 });
 
+
+
+// Helper to determine if a location is urban (used for box size calculation)
+async function isUrbanLocation(lat, lon) {
+  try {
+    // Use Google Places API to determine if the area is densely populated
+    const response = await axios.get(
+      `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lon}&radius=500&type=establishment&key=${process.env.GOOGLE_PLACES_API_KEY}`
+    );
+    
+    // If there are many establishments in a small radius, it's likely urban
+    return response.data.results.length > 10;
+  } catch (error) {
+    console.error("Error determining location type:", error.message);
+    return false; // Default to non-urban
+  }
+}
 
 export default router;
