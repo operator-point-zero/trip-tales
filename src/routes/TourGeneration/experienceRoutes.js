@@ -341,6 +341,81 @@ const getWeightedRandomSelection = (items, count, weights = null) => {
 //   return locationSets;
 // };
 
+// const generateDiverseLocationSets = (attractions, userLat, userLon, numSets = 10, locationsPerSet = 4) => {
+//   // Categorize all attractions
+//   const categorized = categorizeAttractions(attractions);
+  
+//   // Calculate distance from user to each attraction
+//   attractions.forEach(place => {
+//     place.distanceFromUser = Math.sqrt(
+//       Math.pow(place.lat - userLat, 2) + Math.pow(place.lon - userLon, 2)
+//     );
+//   });
+  
+//   // Prepare diverse theme sets
+//   const themeSets = [
+//     // Format: [Theme name, [categories to sample from], min items per category]
+//     ["Historical Highlights", ["historical", "landmarks"], 2],
+//     ["Arts & Culture", ["museums", "arts", "historical"], 2],
+//     ["Nature Escape", ["nature", "landmarks"], 2],
+//     ["Religious Heritage", ["religious", "historical"], 2],
+//     ["Family Fun", ["entertainment", "nature", "landmarks"], 2],
+//     ["Local Neighborhoods", ["neighborhoods", "shopping", "landmarks"], 2],
+//     ["Hidden Gems", ["other", "landmarks", "neighborhoods"], 2],
+//     ["Architectural Marvels", ["historical", "religious", "landmarks"], 2],
+//     ["Photography Spots", ["nature", "landmarks", "historical"], 2],
+//     ["Cultural Immersion", ["museums", "arts", "neighborhoods"], 2]
+//   ];
+  
+//   // Generate diverse location sets
+//   const locationSets = [];
+//   for (let i = 0; i < numSets && i < themeSets.length; i++) {
+//     const [theme, categoriesToUse, minPerCategory] = themeSets[i];
+    
+//     // Gather all available attractions for this theme
+//     let availableForTheme = [];
+//     categoriesToUse.forEach(category => {
+//       if (categorized[category] && categorized[category].length > 0) {
+//         availableForTheme = [...availableForTheme, ...categorized[category]];
+//       }
+//     });
+    
+//     // Create a more robust unique identifier using both placeId and coordinates
+//     // This ensures deduplication even when placeId might be missing
+//     availableForTheme = Array.from(
+//       new Map(
+//         availableForTheme.map(item => {
+//           // Create a composite key using placeId if available, otherwise use lat/lon
+//           const uniqueKey = item.placeId || `${item.lat.toFixed(6)}_${item.lon.toFixed(6)}`;
+//           return [uniqueKey, item];
+//         })
+//       ).values()
+//     );
+    
+//     // Apply proximity weighting (favor closer places)
+//     const weights = availableForTheme.map(place => 
+//       1 / (place.distanceFromUser + 0.01) // Add small value to avoid division by zero
+//     );
+    
+//     // Get unique locations for this set
+//     const selectedLocations = getWeightedRandomSelection(
+//       availableForTheme, 
+//       locationsPerSet,
+//       weights
+//     );
+    
+//     // If we have enough locations, add this set
+//     if (selectedLocations.length >= 2) {
+//       locationSets.push({
+//         theme,
+//         locations: selectedLocations
+//       });
+//     }
+//   }
+  
+//   return locationSets;
+// };
+
 const generateDiverseLocationSets = (attractions, userLat, userLon, numSets = 10, locationsPerSet = 4) => {
   // Categorize all attractions
   const categorized = categorizeAttractions(attractions);
@@ -367,6 +442,9 @@ const generateDiverseLocationSets = (attractions, userLat, userLon, numSets = 10
     ["Cultural Immersion", ["museums", "arts", "neighborhoods"], 2]
   ];
   
+  // Track all selected locations across all sets to prevent cross-theme duplicates
+  const allSelectedLocations = new Set();
+  
   // Generate diverse location sets
   const locationSets = [];
   for (let i = 0; i < numSets && i < themeSets.length; i++) {
@@ -392,6 +470,15 @@ const generateDiverseLocationSets = (attractions, userLat, userLon, numSets = 10
       ).values()
     );
     
+    // Filter out locations already used in other themes
+    availableForTheme = availableForTheme.filter(item => {
+      const uniqueKey = item.placeId || `${item.lat.toFixed(6)}_${item.lon.toFixed(6)}`;
+      return !allSelectedLocations.has(uniqueKey);
+    });
+    
+    // If not enough locations available after filtering, continue to next theme
+    if (availableForTheme.length < 2) continue;
+    
     // Apply proximity weighting (favor closer places)
     const weights = availableForTheme.map(place => 
       1 / (place.distanceFromUser + 0.01) // Add small value to avoid division by zero
@@ -406,6 +493,12 @@ const generateDiverseLocationSets = (attractions, userLat, userLon, numSets = 10
     
     // If we have enough locations, add this set
     if (selectedLocations.length >= 2) {
+      // Add the selected location keys to our tracking set
+      selectedLocations.forEach(item => {
+        const uniqueKey = item.placeId || `${item.lat.toFixed(6)}_${item.lon.toFixed(6)}`;
+        allSelectedLocations.add(uniqueKey);
+      });
+      
       locationSets.push({
         theme,
         locations: selectedLocations
@@ -414,6 +507,50 @@ const generateDiverseLocationSets = (attractions, userLat, userLon, numSets = 10
   }
   
   return locationSets;
+};
+
+const checkForDuplicateExperiences = async (newExperiences, latitude, longitude, boxSize = 0.05) => {
+  try {
+    // Find existing experiences in the same area
+    const existingExperiences = await Experience.find({
+      is_seed: true,
+      "location_center.lat": { $gte: latitude - boxSize, $lte: latitude + boxSize },
+      "location_center.lon": { $gte: longitude - boxSize, $lte: longitude + boxSize },
+    });
+    
+    if (existingExperiences.length === 0) return newExperiences;
+    
+    console.log(`Found ${existingExperiences.length} existing experiences in the area to check against`);
+    
+    // Filter out new experiences that are too similar to existing ones
+    const uniqueExperiences = newExperiences.filter(newExp => {
+      // Consider an experience a duplicate if 50% or more of its locations
+      // are very close to locations in an existing experience
+      const isDuplicate = existingExperiences.some(existingExp => {
+        // Count how many locations in the new experience are similar to existing ones
+        const similarLocations = newExp.locations.filter(newLoc => 
+          existingExp.locations.some(existingLoc => {
+            const latDiff = Math.abs(newLoc.lat - existingLoc.lat);
+            const lonDiff = Math.abs(newLoc.lon - existingLoc.lon);
+            // Very small difference threshold (approximately 50-100 meters)
+            return latDiff < 0.0005 && lonDiff < 0.0005; 
+          })
+        );
+        
+        // If more than half of locations are similar, consider it a duplicate
+        return similarLocations.length >= (newExp.locations.length * 0.5);
+      });
+      
+      return !isDuplicate;
+    });
+    
+    console.log(`Filtered out ${newExperiences.length - uniqueExperiences.length} duplicate experiences`);
+    return uniqueExperiences;
+  } catch (error) {
+    console.error("Error in checkForDuplicateExperiences:", error);
+    // In case of error, return original experiences
+    return newExperiences;
+  }
 };
 
 // Modified to generate diverse experiences and fetch location photos
@@ -761,25 +898,98 @@ const getNearbyPlacesWithDeduplication = async (latitude, longitude) => {
 };
 
 // NEW: Function to save experiences with a storage strategy
-const saveExperiencesToDatabase = async (experiences, userId, latitude, longitude) => {
-  // Add strategic metadata to experiences
-  const enhancedExperiences = experiences.map(exp => ({
-    ...exp,
-    user_id: userId,
-    created_at: new Date(),
-    location_center: {
-      lat: latitude,
-      lon: longitude
-    },
-    // This is a reuse flag that indicates these are seed experiences that can be shown to other users
-    is_seed: true,
-    times_shown: 0
-  }));
+// const saveExperiencesToDatabase = async (experiences, userId, latitude, longitude) => {
+//   // Add strategic metadata to experiences
+//   const enhancedExperiences = experiences.map(exp => ({
+//     ...exp,
+//     user_id: userId,
+//     created_at: new Date(),
+//     location_center: {
+//       lat: latitude,
+//       lon: longitude
+//     },
+//     // This is a reuse flag that indicates these are seed experiences that can be shown to other users
+//     is_seed: true,
+//     times_shown: 0
+//   }));
   
-  // Save to database
-  await Experience.insertMany(enhancedExperiences);
-  return enhancedExperiences;
+//   // Save to database
+//   await Experience.insertMany(enhancedExperiences);
+//   return enhancedExperiences;
+// };
+
+const saveExperiencesToDatabase = async (experiences, userId, latitude, longitude) => {
+  try {
+    // Check for duplicates before saving
+    const uniqueExperiences = await checkForDuplicateExperiences(experiences, latitude, longitude);
+    
+    // Add strategic metadata to experiences
+    const enhancedExperiences = uniqueExperiences.map(exp => ({
+      ...exp,
+      user_id: userId,
+      created_at: new Date(),
+      location_center: {
+        lat: latitude,
+        lon: longitude
+      },
+      // This is a reuse flag that indicates these are seed experiences that can be shown to other users
+      is_seed: true,
+      times_shown: 0
+    }));
+    
+    // Only save if we have unique experiences
+    if (enhancedExperiences.length > 0) {
+      await Experience.insertMany(enhancedExperiences);
+    }
+    
+    return enhancedExperiences;
+  } catch (error) {
+    console.error("Error saving experiences to database:", error);
+    throw error;
+  }
 };
+
+const formattedExperiences = generatedExperiences.map(exp => ({
+  title: exp.title,
+  description: exp.description,
+  locations: exp.locations.map(loc => ({
+    lat: loc.lat,
+    lon: loc.lon,
+    locationName: loc.locationName,
+    placeId: loc.placeId || null,
+    types: loc.types || [],
+    rating: loc.rating || null,
+    vicinity: loc.vicinity || null,
+    photos: loc.photos || [],
+    narration: loc.narration || `Welcome to ${loc.locationName}, one of the must-visit spots in our tour.`
+  }))
+}));
+
+// Save seed experiences to database, checking for duplicates
+const savedExperiences = await saveExperiencesToDatabase(formattedExperiences, user_id, latitude, longitude);
+
+// Create user-specific copies
+const userVersions = savedExperiences.map(exp => ({
+  ...exp,
+  _id: undefined, // Let MongoDB create a new ID
+  is_seed: false,
+  source_experience_id: exp._id
+}));
+
+// Only save user versions if we have experiences
+if (userVersions.length > 0) {
+  await Experience.insertMany(userVersions);
+}
+
+// Return appropriate response
+if (userVersions.length === 0) {
+  return res.status(404).json({ error: "No unique experiences could be generated for this location" });
+}
+
+res.json({
+  experiences: userVersions,
+  source: "newly_generated"
+});
 
 
 // router.post("/", rateLimit, async (req, res) => {
