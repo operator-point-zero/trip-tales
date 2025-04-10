@@ -513,72 +513,274 @@ const generateDiverseLocationSets = (attractions, userLat, userLon, numSets = 10
 // };
 
 // Modified to generate diverse experiences and fetch location photos
+// const fetchGeminiExperiences = async (nearbyPlaces, latitude, longitude) => {
+//   try {
+//     const locationName = await getLocationNameFromCoordinates(latitude, longitude);
+//     const diverseLocationSets = generateDiverseLocationSets(nearbyPlaces, latitude, longitude);
+
+//     if (diverseLocationSets.length === 0) {
+//       console.error("Failed to generate diverse location sets");
+//       return [];
+//     }
+
+//     const model = genAI.getGenerativeModel({ /* ... your model config ... */ });
+
+//     const generatedExperiencesRaw = []; // Store raw results first
+//     const generatedLocationKeys = new Set(); // Track location sets used
+
+//     for (let i = 0; i < diverseLocationSets.length; i++) {
+//         // ... (rest of the loop generating prompt and calling model) ...
+//          const locationSet = diverseLocationSets[i];
+
+//       if (!locationSet.locations || locationSet.locations.length < 2) continue;
+
+//       // Create a unique key for the location set *before* calling Gemini
+//       const potentialKey = locationSet.locations
+//             .map(loc => loc.placeId)
+//             .sort()
+//             .join(',');
+
+//       // Skip if we already successfully generated an experience for this exact set
+//       if (generatedLocationKeys.has(potentialKey)) {
+//           console.log(`Skipping generation for duplicate location set: ${potentialKey}`);
+//           continue;
+//       }
+
+//       const themePrompt = `... your prompt ...`; // Keep your detailed prompt
+
+//       try {
+//         const result = await model.generateContent({ /* ... */ });
+//         const responseText = result.response.candidates[0].content.parts[0].text;
+//         let cleanedResponse = responseText.replace(/```json\s*|\s*```/g, "");
+//         const experience = JSON.parse(cleanedResponse);
+
+//         // Add placeIds and photos (your existing logic)
+//         const enhancedLocations = await Promise.all(experience.locations.map(async location => {
+//            const matchingPlace = locationSet.locations.find(place =>
+//              // ... your matching logic ...
+//               place.locationName.toLowerCase() === location.locationName.toLowerCase() ||
+//               place.locationName.toLowerCase().includes(location.locationName.toLowerCase()) ||
+//               location.locationName.toLowerCase().includes(place.locationName.toLowerCase())
+//             );
+//             if (matchingPlace) {
+//                 const photos = await getLocationPhotos(matchingPlace.placeId);
+//                 return { /* ... enhance location ... */
+//                     ...location,
+//                     lat: matchingPlace.lat,
+//                     lon: matchingPlace.lon,
+//                     placeId: matchingPlace.placeId,
+//                     types: matchingPlace.types || [],
+//                     rating: matchingPlace.rating || null,
+//                     vicinity: matchingPlace.vicinity || null,
+//                     photos: photos || []
+//                 };
+//             }
+//              return location; // Return original if no match
+//         }));
+
+//         // Check again for placeId uniqueness after enhancement
+//         const finalKey = enhancedLocations
+//             .map(loc => loc.placeId)
+//             .filter(Boolean) // Remove null/undefined placeIds
+//             .sort()
+//             .join(',');
+
+//         // Add only if the final key is unique and valid
+//         if (finalKey && !generatedLocationKeys.has(finalKey)) {
+//             generatedExperiencesRaw.push({
+//                 ...experience,
+//                 locations: enhancedLocations
+//             });
+//             generatedLocationKeys.add(finalKey); // Mark this set as used
+//         } else {
+//              console.log(`Skipping duplicate experience post-generation/enhancement for key: ${finalKey}`);
+//         }
+
+//       } catch (error) {
+//         console.error(`Error generating experience for theme ${locationSet.theme}:`, error);
+//       }
+//     } // End of loop
+
+//     // Optional: Further deduplication based on title/description similarity if needed
+//     // (More complex, might use string similarity libraries)
+
+//     return generatedExperiencesRaw; // Return the deduplicated list
+//   } catch (error) {
+//     // ... your error handling ...
+//      console.error("Gemini API request failed:", error);
+//     if (error instanceof SyntaxError) {
+//       console.error("JSON parsing error. Raw response was likely not valid JSON");
+//     }
+//     return [];
+//   }
+// };
+
 const fetchGeminiExperiences = async (nearbyPlaces, latitude, longitude) => {
   try {
+    // Get location name for the prompt (using current location context)
     const locationName = await getLocationNameFromCoordinates(latitude, longitude);
+    // Using the provided context:
+    // const locationName = "Nakuru, Nakuru County, Kenya"; // Using context provided
+
+    // Generate diverse location sets (using the previously enhanced function)
     const diverseLocationSets = generateDiverseLocationSets(nearbyPlaces, latitude, longitude);
 
-    if (diverseLocationSets.length === 0) {
-      console.error("Failed to generate diverse location sets");
+    if (!diverseLocationSets || diverseLocationSets.length === 0) {
+      console.error("Failed to generate diverse location sets. Nearby places count:", nearbyPlaces.length);
       return [];
     }
+     console.log(`Generated ${diverseLocationSets.length} diverse location sets to attempt.`);
 
-    const model = genAI.getGenerativeModel({ /* ... your model config ... */ });
+    // Define the model configuration object
+    const modelConfig = {
+        model: "gemini-1.5-flash", // Ensure this model name is correct and available
+        safetySettings: [
+            { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+            { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+            { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+            { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" }
+        ],
+        generationConfig: {
+            temperature: 0.7,
+            topP: 0.8,
+            topK: 40,
+            maxOutputTokens: 8192 // Make sure this isn't too high for the model/API limits if issues persist
+        }
+    };
+
+    // *** DEBUGGING LOG ***: Log the configuration object right before the call
+    console.log("Attempting to initialize model with config:", JSON.stringify(modelConfig, null, 2));
+
+    // Get the generative model instance using the defined config
+    const model = genAI.getGenerativeModel(modelConfig);
 
     const generatedExperiencesRaw = []; // Store raw results first
-    const generatedLocationKeys = new Set(); // Track location sets used
+    const generatedLocationKeys = new Set(); // Track location sets used to prevent duplicates
 
+    // We'll generate experiences for each theme separately
     for (let i = 0; i < diverseLocationSets.length; i++) {
-        // ... (rest of the loop generating prompt and calling model) ...
-         const locationSet = diverseLocationSets[i];
+      const locationSet = diverseLocationSets[i];
 
-      if (!locationSet.locations || locationSet.locations.length < 2) continue;
+      // Skip if not enough locations
+      if (!locationSet || !locationSet.locations || locationSet.locations.length < 2) {
+        console.log(`Skipping location set ${i} due to insufficient locations.`);
+        continue;
+      }
 
-      // Create a unique key for the location set *before* calling Gemini
+       // Create a unique key for the location set *before* calling Gemini
+       // Ensure placeId exists, filter out null/undefined before joining
       const potentialKey = locationSet.locations
             .map(loc => loc.placeId)
+            .filter(Boolean) // Only consider locations with a placeId
             .sort()
             .join(',');
 
-      // Skip if we already successfully generated an experience for this exact set
-      if (generatedLocationKeys.has(potentialKey)) {
-          console.log(`Skipping generation for duplicate location set: ${potentialKey}`);
+       // Skip if we already successfully generated an experience for this exact set or if key is empty
+      if (!potentialKey || generatedLocationKeys.has(potentialKey)) {
+          console.log(`Skipping generation for duplicate or invalid location set key: ${potentialKey || 'EMPTY_KEY'}`);
           continue;
       }
 
-      const themePrompt = `... your prompt ...`; // Keep your detailed prompt
+      // Create a custom prompt for this specific theme and locations
+      const themePrompt = `
+You are a passionate and highly knowledgeable local tour guide from ${locationName} with decades of experience.
+Your mission is to craft a single immersive, one-of-a-kind tour experience with the theme "${locationSet.theme}".
+
+For EACH of the following REAL locations provided, give a rich, detailed 300-500 word narration in first-person as if you're standing there with travelers:
+${locationSet.locations.map(loc => `- ${loc.locationName} (Place ID: ${loc.placeId || 'N/A'})`).join('\n')}
+
+Your narration for each location MUST include:
+- A warm welcome and orientation.
+- Vivid sensory details (sights, sounds, smells).
+- Fascinating historical context (specific dates, names, events if known and relevant).
+- Personal anecdotes or local insights.
+- Cultural significance.
+- Hidden details often missed.
+- Practical tips (photos, best times, etc.).
+- 2-3 engaging questions for visitors.
+- Smooth transitions connecting locations within this tour.
+
+Format your response as a JSON object, following this structure EXACTLY:
+{
+  "title": "Engaging title for your '${locationSet.theme}' tour in ${locationName}",
+  "description": "Overall tour description connecting these specific locations for the '${locationSet.theme}' theme.",
+  "locations": [
+    {
+      "locationName": "${locationSet.locations[0].locationName}",
+      "lat": ${locationSet.locations[0].lat},
+      "lon": ${locationSet.locations[0].lon},
+      "narration": "Detailed 300-500 word narration for ${locationSet.locations[0].locationName} here...",
+      "photos": [] // Placeholder, will be filled later
+    }
+    // ... include ONE object for EACH location provided above
+  ]
+}
+
+Return ONLY the raw JSON object with no introductory text, explanations, or markdown formatting like \`\`\`json or \`\`\`.
+`; // End of themePrompt
 
       try {
-        const result = await model.generateContent({ /* ... */ });
+        console.log(`Generating content for theme: "${locationSet.theme}" with locations: ${locationSet.locations.map(l=>l.locationName).join(', ')}`);
+        const result = await model.generateContent({
+          contents: [{ role: "user", parts: [{ text: themePrompt }] }],
+        });
+
+        // Check if response and candidate exist before accessing parts
+        if (!result.response || !result.response.candidates || result.response.candidates.length === 0 || !result.response.candidates[0].content || !result.response.candidates[0].content.parts) {
+            console.error(`Invalid response structure received from Gemini for theme ${locationSet.theme}. Skipping.`);
+            continue; // Skip to the next location set
+        }
+
         const responseText = result.response.candidates[0].content.parts[0].text;
-        let cleanedResponse = responseText.replace(/```json\s*|\s*```/g, "");
+
+        // Clean up potential markdown code blocks
+        let cleanedResponse = responseText.trim();
+        if (cleanedResponse.startsWith("```json")) {
+            cleanedResponse = cleanedResponse.substring(7); // Remove ```json
+        }
+        if (cleanedResponse.endsWith("```")) {
+           cleanedResponse = cleanedResponse.substring(0, cleanedResponse.length - 3); // Remove ```
+        }
+        cleanedResponse = cleanedResponse.trim(); // Trim again after removing backticks
+
+
+        // Parse the JSON response
         const experience = JSON.parse(cleanedResponse);
 
-        // Add placeIds and photos (your existing logic)
-        const enhancedLocations = await Promise.all(experience.locations.map(async location => {
+        // Add placeIds and fetch photos (using your existing logic)
+        const enhancedLocations = await Promise.all(experience.locations.map(async (locationFromJson) => {
+          // Find the corresponding location from the input set to get accurate data
            const matchingPlace = locationSet.locations.find(place =>
-             // ... your matching logic ...
-              place.locationName.toLowerCase() === location.locationName.toLowerCase() ||
-              place.locationName.toLowerCase().includes(location.locationName.toLowerCase()) ||
-              location.locationName.toLowerCase().includes(place.locationName.toLowerCase())
+              // Prioritize matching by name provided in the JSON, fall back to other checks
+              place.locationName.toLowerCase() === locationFromJson.locationName.toLowerCase() ||
+              place.locationName.toLowerCase().includes(locationFromJson.locationName.toLowerCase()) ||
+              locationFromJson.locationName.toLowerCase().includes(place.locationName.toLowerCase())
             );
-            if (matchingPlace) {
-                const photos = await getLocationPhotos(matchingPlace.placeId);
-                return { /* ... enhance location ... */
-                    ...location,
-                    lat: matchingPlace.lat,
-                    lon: matchingPlace.lon,
-                    placeId: matchingPlace.placeId,
-                    types: matchingPlace.types || [],
-                    rating: matchingPlace.rating || null,
-                    vicinity: matchingPlace.vicinity || null,
-                    photos: photos || []
-                };
-            }
-             return location; // Return original if no match
+
+          if (matchingPlace && matchingPlace.placeId) {
+            const photos = await getLocationPhotos(matchingPlace.placeId); // Fetch photos
+            return {
+              ...locationFromJson, // Keep narration, lat/lon from Gemini for now
+              lat: matchingPlace.lat, // Override with original accurate lat
+              lon: matchingPlace.lon, // Override with original accurate lon
+              placeId: matchingPlace.placeId, // Add the correct placeId
+              types: matchingPlace.types || [],
+              rating: matchingPlace.rating || null,
+              vicinity: matchingPlace.vicinity || null,
+              photos: photos || [] // Add fetched photos
+            };
+          } else {
+             // If no match found (Gemini might have hallucinated or name mismatch is too large),
+             // return the Gemini data but log a warning. Photos won't be fetched.
+             console.warn(`Could not find matching placeId for location: "${locationFromJson.locationName}" in experience "${experience.title}". Using data from Gemini response.`);
+             return {
+                 ...locationFromJson,
+                 photos: [] // Ensure photos is an empty array
+             };
+          }
         }));
 
-        // Check again for placeId uniqueness after enhancement
+        // Final check for placeId uniqueness after enhancement
         const finalKey = enhancedLocations
             .map(loc => loc.placeId)
             .filter(Boolean) // Remove null/undefined placeIds
@@ -589,29 +791,37 @@ const fetchGeminiExperiences = async (nearbyPlaces, latitude, longitude) => {
         if (finalKey && !generatedLocationKeys.has(finalKey)) {
             generatedExperiencesRaw.push({
                 ...experience,
-                locations: enhancedLocations
+                locations: enhancedLocations // Use the enhanced locations array
             });
-            generatedLocationKeys.add(finalKey); // Mark this set as used
+            generatedLocationKeys.add(finalKey); // Mark this unique set as used
+            console.log(`Successfully generated and added experience for theme: "${locationSet.theme}", final key: ${finalKey}`);
         } else {
-             console.log(`Skipping duplicate experience post-generation/enhancement for key: ${finalKey}`);
+             console.log(`Skipping duplicate experience post-generation/enhancement for key: ${finalKey || 'EMPTY_KEY'}`);
         }
 
       } catch (error) {
-        console.error(`Error generating experience for theme ${locationSet.theme}:`, error);
+         // Log errors during generation or parsing for a specific theme
+        console.error(`Error processing experience for theme "${locationSet.theme}":`, error);
+        if (error instanceof SyntaxError) {
+            console.error("JSON parsing error likely occurred for the above theme. Raw response might be invalid JSON.");
+            // Optionally log the 'cleanedResponse' here for debugging, but be mindful of log size/PII
+            // console.error("Raw response text before parse failure:", cleanedResponse);
+        }
+        // Continue with other themes even if one fails
       }
-    } // End of loop
+    } // End of for loop iterating through diverseLocationSets
 
-    // Optional: Further deduplication based on title/description similarity if needed
-    // (More complex, might use string similarity libraries)
-
+    console.log(`Finished generation loop. Total experiences generated: ${generatedExperiencesRaw.length}`);
     return generatedExperiencesRaw; // Return the deduplicated list
+
   } catch (error) {
-    // ... your error handling ...
-     console.error("Gemini API request failed:", error);
-    if (error instanceof SyntaxError) {
-      console.error("JSON parsing error. Raw response was likely not valid JSON");
+    // Catch errors related to initial setup (getting model, location name etc.)
+    console.error("Error in fetchGeminiExperiences function:", error);
+    // Check if it's the specific model name error we were looking for
+    if (error.message && error.message.includes("Must provide a model name")) {
+        console.error(">>> THE 'Must provide a model name' ERROR PERSISTS! Check Render environment variables and deployment status. <<<");
     }
-    return [];
+    return []; // Return empty array on failure
   }
 };
 
