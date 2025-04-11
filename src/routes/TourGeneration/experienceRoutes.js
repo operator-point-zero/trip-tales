@@ -21,8 +21,8 @@ const placesCache = {
     this[type].set(key, data);
     // Set expiration (e.g., 1 hour)
     setTimeout(() => {
-      console.log(`Cache expired and removed for key: ${key}`);
-      this[type].delete(key);
+        console.log(`Cache expired and removed for key: ${key}`);
+        this[type].delete(key);
     }, 60 * 60 * 1000);
     console.log(`Cache set for key: ${key}`);
   }
@@ -61,21 +61,19 @@ const getLocationNameFromCoordinates = async (lat, lon) => {
 };
 
 // Enhanced to fetch and categorize places (primarily tourist attractions)
-const getNearbyPlaces = async (lat, lon, radius = 7500) => { // Increased default radius to 7.5km
+const getNearbyPlaces = async (lat, lon, radius = 5000) => { // Default radius 5km
   const type = 'attractions'; // Using a generic type for cache
   try {
     // Check cache first
     const cachedData = placesCache.get(type, lat, lon, radius);
     if (cachedData) {
-      console.log(`Cache hit for nearby places: ${lat.toFixed(4)},${lon.toFixed(4)},${radius}`);
-      return cachedData;
+        console.log(`Cache hit for nearby places: ${lat.toFixed(4)},${lon.toFixed(4)},${radius}`);
+        return cachedData;
     }
     console.log(`Cache miss for nearby places: ${lat.toFixed(4)},${lon.toFixed(4)},${radius}. Fetching from API...`);
 
-    // Include more relevant types in the initial search
-    const searchTypes = "tourist_attraction|museum|park|point_of_interest|landmark";
     const response = await axios.get(
-      `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lon}&radius=${radius}&type=${searchTypes}&key=${process.env.GOOGLE_PLACES_API_KEY}`
+      `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lon}&radius=${radius}&type=tourist_attraction&key=${process.env.GOOGLE_PLACES_API_KEY}`
     );
 
     const places = response.data.results.map(place => ({
@@ -101,16 +99,16 @@ const getNearbyPlaces = async (lat, lon, radius = 7500) => { // Increased defaul
 const searchForAdditionalAttractions = async (lat, lon, radius = 15000) => { // Radius 15km
   const type = 'additional_attractions'; // Specific cache type
   try {
-    // Check cache first
+     // Check cache first
     const cachedData = placesCache.get(type, lat, lon, radius);
     if (cachedData) {
-      console.log(`Cache hit for additional attractions: ${lat.toFixed(4)},${lon.toFixed(4)},${radius}`);
-      return cachedData;
+        console.log(`Cache hit for additional attractions: ${lat.toFixed(4)},${lon.toFixed(4)},${radius}`);
+        return cachedData;
     }
     console.log(`Cache miss for additional attractions: ${lat.toFixed(4)},${lon.toFixed(4)},${radius}. Fetching from API...`);
 
     // Perform a single search with multiple types to reduce API calls
-    const searchTypes = "museum|park|church|mosque|temple|zoo|aquarium|art_gallery|landmark|historical_site|amusement_park|natural_feature"; // Added more types
+    const searchTypes = "museum|park|church|mosque|temple|zoo|aquarium|art_gallery|landmark|historical_site";
     const response = await axios.get(
       `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lon}&radius=${radius}&type=${searchTypes}&key=${process.env.GOOGLE_PLACES_API_KEY}`
     );
@@ -125,7 +123,7 @@ const searchForAdditionalAttractions = async (lat, lon, radius = 15000) => { // 
       vicinity: place.vicinity || null
     }));
 
-    // Cache the results
+     // Cache the results
     placesCache.set(type, lat, lon, radius, attractions);
     return attractions;
   } catch (error) {
@@ -144,7 +142,7 @@ const getLocationPhotos = async (placeId) => {
     );
 
     if (detailsResponse.data.result && detailsResponse.data.result.photos) {
-      // Limit to max 3 photos
+        // Limit to max 3 photos
       return detailsResponse.data.result.photos.slice(0, 3).map(photo => {
         // Construct photo URL
         return `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference=${photo.photo_reference}&key=${process.env.GOOGLE_PLACES_API_KEY}`;
@@ -189,13 +187,13 @@ const categorizeAttractions = (attractions) => {
   // De-duplicate across categories (keep first categorization) - simple approach
   const seenPlaceIds = new Set();
   for (const category in categories) {
-    categories[category] = categories[category].filter(place => {
-      if (seenPlaceIds.has(place.placeId)) {
-        return false;
-      }
-      seenPlaceIds.add(place.placeId);
-      return true;
-    });
+      categories[category] = categories[category].filter(place => {
+          if (seenPlaceIds.has(place.placeId)) {
+              return false;
+          }
+          seenPlaceIds.add(place.placeId);
+          return true;
+      });
   }
 
   return categories;
@@ -215,17 +213,17 @@ const getWeightedRandomSelection = (items, count, weights = null) => {
     let index;
     if (currentWeights && currentWeights.length === availableItems.length && currentWeights.length > 0) {
       const totalWeight = currentWeights.reduce((sum, w) => sum + w, 0);
-      if (totalWeight <= 0) { // Handle case where all weights are zero or negative
-        index = Math.floor(Math.random() * availableItems.length);
-      } else {
-        let random = Math.random() * totalWeight;
-        for (index = 0; index < currentWeights.length; index++) {
-          random -= currentWeights[index];
-          if (random <= 0) break;
-        }
-        // Ensure index is within bounds in case of floating point issues
-        index = Math.min(index, availableItems.length - 1);
-      }
+       if (totalWeight <= 0) { // Handle case where all weights are zero or negative
+           index = Math.floor(Math.random() * availableItems.length);
+       } else {
+            let random = Math.random() * totalWeight;
+            for (index = 0; index < currentWeights.length; index++) {
+                random -= currentWeights[index];
+                if (random <= 0) break;
+            }
+            // Ensure index is within bounds in case of floating point issues
+            index = Math.min(index, availableItems.length - 1);
+       }
     } else {
       // Uniform random selection if weights are invalid or not provided
       index = Math.floor(Math.random() * availableItems.length);
@@ -234,7 +232,7 @@ const getWeightedRandomSelection = (items, count, weights = null) => {
     selected.push(availableItems[index]);
     availableItems.splice(index, 1); // Remove selected item
     if (currentWeights) {
-      currentWeights.splice(index, 1); // Remove corresponding weight
+        currentWeights.splice(index, 1); // Remove corresponding weight
     }
   }
 
@@ -242,7 +240,7 @@ const getWeightedRandomSelection = (items, count, weights = null) => {
 };
 
 // Function to generate diverse location sets based on themes and proximity
-const generateDiverseLocationSets = (attractions, userLat, userLon, numSets = 12, locationsPerSet = 4) => { // Increased numSets
+const generateDiverseLocationSets = (attractions, userLat, userLon, numSets = 10, locationsPerSet = 4) => {
   if (!attractions || attractions.length === 0) return [];
 
   // Categorize all attractions
@@ -262,13 +260,11 @@ const generateDiverseLocationSets = (attractions, userLat, userLon, numSets = 12
     ["Nature Escape", ["nature", "landmarks", "parks"], 2], // Added parks
     ["Religious & Spiritual Sites", ["religious", "historical", "landmarks"], 2],
     ["Family Fun", ["entertainment", "nature", "landmarks", "zoo", "aquarium"], 2],
-    ["Local Vibe & Shopping", ["neighborhoods", "shopping", "landmarks", "cafe"], 2], // Added cafe
-    ["Hidden Gems & Local Spots", ["other", "landmarks", "neighborhoods", "restaurant"], 2], // Added restaurant
+    ["Local Vibe & Shopping", ["neighborhoods", "shopping", "landmarks", "cafes"], 2], // Added cafes
+    ["Hidden Gems & Local Spots", ["other", "landmarks", "neighborhoods", "restaurants"], 2], // Added restaurants
     ["Architectural Wonders", ["historical", "religious", "landmarks", "modern_architecture"], 2], // Added example
-    ["Scenic Views & Photo Ops", ["nature", "landmarks", "historical", "viewpoint"], 2], // Added viewpoint
-    ["Cultural Immersion", ["museums", "arts", "neighborhoods", "market"], 2], // Added market
-    ["Adventure Time", ["nature", "entertainment", "landmark"], 2], // Added new theme
-    ["Relaxing Getaway", ["nature", "park", "landmark"], 2] // Added new theme
+    ["Scenic Views & Photo Ops", ["nature", "landmarks", "historical", "viewpoints"], 2], // Added viewpoints
+    ["Cultural Immersion", ["museums", "arts", "neighborhoods", "markets"], 2] // Added markets
   ];
 
   const locationSets = [];
@@ -317,17 +313,17 @@ const generateDiverseLocationSets = (attractions, userLat, userLon, numSets = 12
   }
 
   // If still not enough sets, try a general "Best Of" category with less strict filtering
-  if (locationSets.length < Math.min(numSets, 5) && attractions.length >= locationsPerSet) {
-    console.log("Generating additional 'Best Of' sets due to low theme-specific results.");
-    const allAvailable = attractions.filter(p => !usedPlaceIdsInSession.has(p.placeId));
-    if (allAvailable.length >= 2) {
-      const weights = allAvailable.map(place => 1 / place.distanceSq);
-      const bestOfLocations = getWeightedRandomSelection(allAvailable, locationsPerSet, weights);
-      if (bestOfLocations.length >= 2) {
-        locationSets.push({ theme: "Best Of The Area", locations: bestOfLocations });
-        bestOfLocations.forEach(loc => usedPlaceIdsInSession.add(loc.placeId));
-      }
-    }
+  if(locationSets.length < Math.min(numSets, 5) && attractions.length >= locationsPerSet) {
+      console.log("Generating additional 'Best Of' sets due to low theme-specific results.");
+      const allAvailable = attractions.filter(p => !usedPlaceIdsInSession.has(p.placeId));
+       if(allAvailable.length >= 2) {
+            const weights = allAvailable.map(place => 1 / place.distanceSq);
+            const bestOfLocations = getWeightedRandomSelection(allAvailable, locationsPerSet, weights);
+            if(bestOfLocations.length >= 2) {
+                locationSets.push({ theme: "Best Of The Area", locations: bestOfLocations });
+                bestOfLocations.forEach(loc => usedPlaceIdsInSession.add(loc.placeId));
+            }
+       }
   }
 
 
@@ -339,32 +335,32 @@ const generateDiverseLocationSets = (attractions, userLat, userLon, numSets = 12
 // Modified to generate diverse experiences and fetch location photos
 const fetchGeminiExperiences = async (nearbyPlaces, latitude, longitude) => {
   if (!nearbyPlaces || nearbyPlaces.length === 0) {
-    console.error("fetchGeminiExperiences called with no nearby places.");
-    return [];
+      console.error("fetchGeminiExperiences called with no nearby places.");
+      return [];
   }
   try {
     const locationName = await getLocationNameFromCoordinates(latitude, longitude);
     console.log(`Generating experiences for: ${locationName}`);
 
-    // Generate diverse location sets (aim for ~12 sets, 4 locations each) - Increased target
-    const diverseLocationSets = generateDiverseLocationSets(nearbyPlaces, latitude, longitude, 12, 4);
+    // Generate diverse location sets (aim for ~10 sets, 4 locations each)
+    const diverseLocationSets = generateDiverseLocationSets(nearbyPlaces, latitude, longitude, 10, 4);
 
     if (diverseLocationSets.length === 0) {
       console.error("Failed to generate any diverse location sets from nearby places.");
       // Fallback: Try generating one experience with the top N places?
       // Simple fallback: select top 4 rated/closest places if possible
-      const fallbackPlaces = nearbyPlaces.sort((a, b) => (b.rating || 0) - (a.rating || 0)).slice(0, 4);
+      const fallbackPlaces = nearbyPlaces.sort((a,b) => (b.rating || 0) - (a.rating || 0)).slice(0, 4);
       if (fallbackPlaces.length >= 2) {
-        console.log("Using fallback selection of top places.");
-        diverseLocationSets.push({ theme: `Highlights of ${locationName}`, locations: fallbackPlaces });
+          console.log("Using fallback selection of top places.");
+          diverseLocationSets.push({ theme: `Highlights of ${locationName}`, locations: fallbackPlaces });
       } else {
-        return []; // Cannot proceed if no sets and fallback fails
+          return []; // Cannot proceed if no sets and fallback fails
       }
     }
 
     const model = genAI.getGenerativeModel({
       model: "gemini-1.5-flash", // Ensure this model is available and suitable
-      safetySettings: [ // Standard safety settings
+       safetySettings: [ // Standard safety settings
         { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
         { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
         { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
@@ -423,76 +419,76 @@ Constraints:
 
       // Add generation promise to the array
       generationPromises.push(
-        model.generateContent({ contents: [{ role: "user", parts: [{ text: themePrompt }] }] })
-          .then(async result => {
-            if (!result.response || !result.response.candidates || !result.response.candidates[0].content || !result.response.candidates[0].content.parts || !result.response.candidates[0].content.parts[0].text) {
-              throw new Error(`Invalid response structure from Gemini for theme: ${locationSet.theme}`);
-            }
-            const responseText = result.response.candidates[0].content.parts[0].text;
+          model.generateContent({ contents: [{ role: "user", parts: [{ text: themePrompt }] }] })
+            .then(async result => {
+                if (!result.response || !result.response.candidates || !result.response.candidates[0].content || !result.response.candidates[0].content.parts || !result.response.candidates[0].content.parts[0].text) {
+                    throw new Error(`Invalid response structure from Gemini for theme: ${locationSet.theme}`);
+                }
+                const responseText = result.response.candidates[0].content.parts[0].text;
 
-            // Attempt to parse the JSON response
-            let experience;
-            try {
-              experience = JSON.parse(responseText);
-            } catch (parseError) {
-              console.error(`JSON parsing failed for theme ${locationSet.theme}. Raw response:`, responseText);
-              throw new Error(`Failed to parse JSON response for theme ${locationSet.theme}: ${parseError.message}`);
-            }
-
-
-            // Validate basic structure
-            if (!experience || !experience.title || !experience.description || !Array.isArray(experience.locations)) {
-              console.error("Parsed JSON is missing required fields for theme:", locationSet.theme, experience);
-              throw new Error(`Parsed JSON structure is invalid for theme: ${locationSet.theme}`);
-            }
+                // Attempt to parse the JSON response
+                let experience;
+                try {
+                     experience = JSON.parse(responseText);
+                } catch(parseError) {
+                     console.error(`JSON parsing failed for theme ${locationSet.theme}. Raw response:`, responseText);
+                     throw new Error(`Failed to parse JSON response for theme ${locationSet.theme}: ${parseError.message}`);
+                }
 
 
-            // Enhance locations with data from nearbyPlaces and fetch photos
-            const enhancedLocations = await Promise.all(experience.locations.map(async (genLocation) => {
-              // Find the corresponding input location more reliably using placeId or name/coords
-              const inputLocation = locationSet.locations.find(inputLoc =>
-                (genLocation.placeId && inputLoc.placeId === genLocation.placeId) ||
-                (inputLoc.locationName.toLowerCase() === genLocation.locationName.toLowerCase() &&
-                  Math.abs(inputLoc.lat - genLocation.lat) < 0.001 && // Tolerance for float comparison
-                  Math.abs(inputLoc.lon - genLocation.lon) < 0.001)
-              );
+                // Validate basic structure
+                 if (!experience || !experience.title || !experience.description || !Array.isArray(experience.locations)) {
+                    console.error("Parsed JSON is missing required fields for theme:", locationSet.theme, experience);
+                    throw new Error(`Parsed JSON structure is invalid for theme: ${locationSet.theme}`);
+                }
 
-              if (!inputLocation) {
-                console.warn(`Could not reliably match generated location "${genLocation.locationName}" back to input for theme ${locationSet.theme}. Using generated data.`);
-                // Attempt to fetch photos using the placeId from the generated data if available
-                const photos = genLocation.placeId ? await getLocationPhotos(genLocation.placeId) : [];
-                return { ...genLocation, photos: photos || [] };
-              }
 
-              // Fetch photos using the reliable placeId from the input
-              const photos = await getLocationPhotos(inputLocation.placeId);
+                // Enhance locations with data from nearbyPlaces and fetch photos
+                const enhancedLocations = await Promise.all(experience.locations.map(async (genLocation) => {
+                    // Find the corresponding input location more reliably using placeId or name/coords
+                    const inputLocation = locationSet.locations.find(inputLoc =>
+                        (genLocation.placeId && inputLoc.placeId === genLocation.placeId) ||
+                        (inputLoc.locationName.toLowerCase() === genLocation.locationName.toLowerCase() &&
+                         Math.abs(inputLoc.lat - genLocation.lat) < 0.001 && // Tolerance for float comparison
+                         Math.abs(inputLoc.lon - genLocation.lon) < 0.001)
+                    );
 
-              // Return merged data, prioritizing input data for accuracy
-              return {
-                locationName: inputLocation.locationName, // Use original name
-                lat: inputLocation.lat,                 // Use original lat
-                lon: inputLocation.lon,                 // Use original lon
-                placeId: inputLocation.placeId,         // Use original placeId
-                types: inputLocation.types || [],       // Add types from input
-                rating: inputLocation.rating || null,   // Add rating from input
-                vicinity: inputLocation.vicinity || null, // Add vicinity from input
-                narration: genLocation.narration || `Welcome to ${inputLocation.locationName}.`, // Use generated narration
-                photos: photos || []                     // Add fetched photos
-              };
-            }));
+                    if (!inputLocation) {
+                        console.warn(`Could not reliably match generated location "${genLocation.locationName}" back to input for theme ${locationSet.theme}. Using generated data.`);
+                        // Attempt to fetch photos using the placeId from the generated data if available
+                         const photos = genLocation.placeId ? await getLocationPhotos(genLocation.placeId) : [];
+                         return { ...genLocation, photos: photos || [] };
+                    }
 
-            // Add the fully processed experience
-            generatedExperiences.push({
-              ...experience,
-              locations: enhancedLocations
-            });
-            console.log(`Successfully generated and processed experience for theme: ${locationSet.theme}`);
+                    // Fetch photos using the reliable placeId from the input
+                    const photos = await getLocationPhotos(inputLocation.placeId);
 
-          })
-          .catch(error => {
-            console.error(`Error processing generation for theme ${locationSet.theme}:`, error.message);
-            // Don't push anything if an error occurred for this theme
-          })
+                    // Return merged data, prioritizing input data for accuracy
+                    return {
+                        locationName: inputLocation.locationName, // Use original name
+                        lat: inputLocation.lat,                 // Use original lat
+                        lon: inputLocation.lon,                 // Use original lon
+                        placeId: inputLocation.placeId,         // Use original placeId
+                        types: inputLocation.types || [],       // Add types from input
+                        rating: inputLocation.rating || null,   // Add rating from input
+                        vicinity: inputLocation.vicinity || null, // Add vicinity from input
+                        narration: genLocation.narration || `Welcome to ${inputLocation.locationName}.`, // Use generated narration
+                        photos: photos || []                     // Add fetched photos
+                    };
+                }));
+
+                // Add the fully processed experience
+                generatedExperiences.push({
+                    ...experience,
+                    locations: enhancedLocations
+                });
+                 console.log(`Successfully generated and processed experience for theme: ${locationSet.theme}`);
+
+            })
+            .catch(error => {
+                console.error(`Error processing generation for theme ${locationSet.theme}:`, error.message);
+                // Don't push anything if an error occurred for this theme
+            })
       );
     }
 
@@ -524,14 +520,14 @@ const rateLimiter = {
 
     // Clean up old entries occasionally (optional, helps manage memory)
     if (Math.random() < 0.01) { // ~1% chance per request
-      this.requests.forEach((data, keyIp) => {
-        if (data.firstRequestTimestamp < windowStart) {
-          this.requests.delete(keyIp);
-          const timeoutId = this.resetTimeouts.get(keyIp);
-          if (timeoutId) clearTimeout(timeoutId);
-          this.resetTimeouts.delete(keyIp);
-        }
-      });
+        this.requests.forEach((data, keyIp) => {
+            if (data.firstRequestTimestamp < windowStart) {
+                 this.requests.delete(keyIp);
+                 const timeoutId = this.resetTimeouts.get(keyIp);
+                 if (timeoutId) clearTimeout(timeoutId);
+                 this.resetTimeouts.delete(keyIp);
+            }
+        });
     }
 
 
@@ -547,9 +543,9 @@ const rateLimiter = {
       if (existingTimeout) clearTimeout(existingTimeout);
 
       const timeoutId = setTimeout(() => {
-        this.requests.delete(ip);
-        this.resetTimeouts.delete(ip);
-        // console.log(`Rate limit reset for IP: ${ip}`);
+          this.requests.delete(ip);
+          this.resetTimeouts.delete(ip);
+          // console.log(`Rate limit reset for IP: ${ip}`);
       }, this.windowMs);
       this.resetTimeouts.set(ip, timeoutId);
 
@@ -584,7 +580,7 @@ const rateLimit = (req, res, next) => {
 // Helper to filter/score experiences based on user proximity and diversity
 // (Note: User preferences 'params' are not fully utilized in this version)
 const filterExperiencesForUser = (experiences, userLat, userLon, params = {}) => {
-  if (!experiences || experiences.length === 0) return [];
+   if (!experiences || experiences.length === 0) return [];
 
   // Calculate diversity score based on how many experiences share the *exact same locations* (using placeId)
   const locationUsageCount = new Map(); // Map<placeId, count>
@@ -605,15 +601,15 @@ const filterExperiencesForUser = (experiences, userLat, userLon, params = {}) =>
     let validLocations = 0;
     exp.locations.forEach(loc => {
       if (loc.lat && loc.lon) {
-        // Simple Euclidean distance (squared, good enough for comparison)
-        const distSq = Math.pow(loc.lat - userLat, 2) + Math.pow(loc.lon - userLon, 2);
-        // Penalize distance - closer is better. Scale appropriately.
-        // Example scaling: score decreases as distance increases. Max bonus ~25 for very close.
-        score += Math.max(0, 25 - (Math.sqrt(distSq) * 500)); // Adjust multiplier as needed
-        validLocations++;
+          // Simple Euclidean distance (squared, good enough for comparison)
+         const distSq = Math.pow(loc.lat - userLat, 2) + Math.pow(loc.lon - userLon, 2);
+         // Penalize distance - closer is better. Scale appropriately.
+         // Example scaling: score decreases as distance increases. Max bonus ~25 for very close.
+         score += Math.max(0, 25 - (Math.sqrt(distSq) * 500)); // Adjust multiplier as needed
+         validLocations++;
       }
     });
-    // Normalize proximity bonus by number of locations later if needed
+     // Normalize proximity bonus by number of locations later if needed
 
     // 2. Diversity Score (Penalize using overused locations)
     let locationOverlapPenalty = 0;
@@ -622,7 +618,7 @@ const filterExperiencesForUser = (experiences, userLat, userLon, params = {}) =>
         const usage = locationUsageCount.get(loc.placeId) || 1;
         // Penalize more if a location is used in many experiences being considered
         if (usage > 1) {
-          locationOverlapPenalty += (usage - 1) * 5; // Adjust penalty multiplier
+            locationOverlapPenalty += (usage - 1) * 5; // Adjust penalty multiplier
         }
       }
     });
@@ -631,30 +627,30 @@ const filterExperiencesForUser = (experiences, userLat, userLon, params = {}) =>
     // 3. Rating Score (Bonus for highly-rated locations) - Optional
     let avgRating = 0;
     let ratedLocations = 0;
-    exp.locations.forEach(loc => {
-      if (loc.rating && typeof loc.rating === 'number' && loc.rating >= 0) {
-        avgRating += loc.rating;
-        ratedLocations++;
-      }
-    });
-    if (ratedLocations > 0) {
-      avgRating /= ratedLocations;
-      score += (avgRating - 3) * 5; // Bonus for ratings > 3, penalty < 3. Adjust scale.
-    }
+     exp.locations.forEach(loc => {
+         if (loc.rating && typeof loc.rating === 'number' && loc.rating >= 0) {
+             avgRating += loc.rating;
+             ratedLocations++;
+         }
+     });
+     if (ratedLocations > 0) {
+         avgRating /= ratedLocations;
+         score += (avgRating - 3) * 5; // Bonus for ratings > 3, penalty < 3. Adjust scale.
+     }
 
 
-    // Apply preference matching score (basic example)
-    if (params.preferredCategories && Array.isArray(params.preferredCategories)) {
-      let matchScore = 0;
-      exp.locations.forEach(loc => {
-        if (loc.types && Array.isArray(loc.types)) {
-          if (loc.types.some(type => params.preferredCategories.includes(type))) {
-            matchScore += 5; // Add points for each location matching a preferred category
-          }
-        }
-      });
-      score += matchScore;
-    }
+     // Apply preference matching score (basic example)
+     if(params.preferredCategories && Array.isArray(params.preferredCategories)) {
+         let matchScore = 0;
+         exp.locations.forEach(loc => {
+             if(loc.types && Array.isArray(loc.types)) {
+                 if(loc.types.some(type => params.preferredCategories.includes(type))) {
+                     matchScore += 5; // Add points for each location matching a preferred category
+                 }
+             }
+         });
+         score += matchScore;
+     }
 
 
     // Ensure score is within a reasonable range (e.g., 0-100)
@@ -719,43 +715,201 @@ async function isUrbanLocation(lat, lon) {
 // POST /api/experiences - Main route to fetch or generate experiences
 router.post("/", rateLimit, async (req, res) => {
   try {
-    const { lat, lon, user_id, preferredCategories } = req.body; // Assuming preferredCategories is in the request body
-
-    if (!lat || !lon) {
-      return res.status(400).json({ error: "Latitude and longitude are required." });
+    const { lat, lon, user_id, preferences } = req.body;
+    if (lat === undefined || lon === undefined || !user_id) { // Check for undefined too
+      return res.status(400).json({ error: "Latitude, longitude, and user_id are required." });
     }
 
-    // Fetch nearby places (increased radius and more types)
-    const nearbyPlaces = await getNearbyPlaces(lat, lon);
-    // Fetch additional attractions (broader search)
-    const additionalAttractions = await searchForAdditionalAttractions(lat, lon);
+    const latitude = parseFloat(lat);
+    const longitude = parseFloat(lon);
 
-    // Combine and deduplicate attractions
-    const allAttractions = [...nearbyPlaces, ...additionalAttractions].filter((place, index, self) =>
-      index === self.findIndex((p) => p.placeId === place.placeId)
+     if (isNaN(latitude) || isNaN(longitude)) {
+        return res.status(400).json({ error: "Invalid latitude or longitude values." });
+     }
+
+
+    // Parse user preferences safely
+    let userPrefs = {};
+    if (preferences) {
+        try {
+            userPrefs = typeof preferences === 'string' ? JSON.parse(preferences) : preferences;
+        } catch (e) {
+            console.warn("Could not parse user preferences JSON:", preferences);
+            // Proceed without preferences if parsing fails
+        }
+    }
+
+
+    // Determine area granularity based on location type (urban/rural)
+    const isUrban = await isUrbanLocation(latitude, longitude);
+    // Define bounding box size based on density (degrees lat/lon)
+    // Approx 0.1 deg ~ 11km. Adjust these values based on desired area size.
+    const boxSizeLat = isUrban ? 0.07 : 0.15; // Smaller lat range for urban
+    const boxSizeLon = isUrban ? 0.1 : 0.2; // Smaller lon range for urban
+
+
+    // Define the geographic bounding box for queries
+    const geoQueryBounds = {
+        "location_center.lat": { $gte: latitude - boxSizeLat, $lte: latitude + boxSizeLat },
+        "location_center.lon": { $gte: longitude - boxSizeLon, $lte: longitude + boxSizeLon },
+    };
+
+
+    // Step 1: Check if we already have non-seed experiences for this EXACT user in the area
+    const userSpecificExperiences = await Experience.find({
+      user_id: user_id,
+      is_seed: false, // Look for user-specific copies
+      ...geoQueryBounds // Apply geographic filter
+    }).limit(15).sort({ created_at: -1 }); // Get latest user copies
+
+    if (userSpecificExperiences.length > 0) {
+      console.log(`Returning ${userSpecificExperiences.length} existing user-specific experiences for user ${user_id}`);
+      return res.json({ experiences: userSpecificExperiences, source: "user_cache" });
+    }
+
+    // Step 2: Check if we have suitable seed experiences in the area
+    // Find seeds the user hasn't already explicitly cloned (if source_experience_id is reliably set)
+    const existingUserSourceIds = userSpecificExperiences // Re-use previous query result if needed
+        .map(exp => exp.source_experience_id)
+        .filter(id => id); // Filter out null/undefined
+
+    const seedExperiences = await Experience.find({
+      is_seed: true,
+      ...geoQueryBounds, // Apply geographic filter
+      _id: { $nin: existingUserSourceIds } // Exclude seeds already cloned by this user
+    }).sort({ times_shown: 1 }).limit(30); // Get more seeds to allow for better filtering
+
+    // If we have enough diverse seed experiences, filter, select, and clone for this user
+    if (seedExperiences.length >= 5) { // Need a decent pool to select from
+      console.log(`Found ${seedExperiences.length} potential seed experiences for area near ${latitude}, ${longitude}`);
+
+      // Filter and prioritize seed experiences based on proximity, diversity, and preferences
+      const filteredSeedExperiences = filterExperiencesForUser(
+        seedExperiences,
+        latitude,
+        longitude,
+        userPrefs
+      );
+
+      // Take top N (e.g., 10) most relevant experiences from the filtered list
+      const selectedSeeds = filteredSeedExperiences.slice(0, 10);
+
+      if (selectedSeeds.length > 0) {
+            // Update usage count for the selected seed experiences
+            const seedIdsToUpdate = selectedSeeds.map(exp => exp._id);
+            await Experience.updateMany(
+                { _id: { $in: seedIdsToUpdate } },
+                { $inc: { times_shown: 1 } }
+            );
+
+            // Create user-specific clones (new documents)
+            const userClonesData = selectedSeeds.map(seed => ({
+                ...seed.toObject(), // Convert Mongoose doc to plain object
+                _id: undefined, // Let MongoDB generate a new unique ID
+                user_id: user_id, // Assign to the current user
+                is_seed: false, // Mark as a user-specific copy
+                source_experience_id: seed._id, // Link back to the original seed
+                created_at: new Date(), // Set creation time for the clone
+                times_shown: 1, // Initialize show count for this user copy (or maybe 0?)
+                relevanceScore: undefined // Remove score used for filtering seeds
+            }));
+
+            // Save the user-specific clones to the database
+            const savedUserClones = await Experience.insertMany(userClonesData);
+            console.log(`Saved ${savedUserClones.length} user-specific clones for user ${user_id} from seeds.`);
+
+            return res.json({
+                experiences: savedUserClones, // Return the newly created clones
+                source: "customized_from_seed"
+            });
+      } else {
+           console.log("Filtering removed all seed candidates. Proceeding to generate new ones.");
+      }
+    }
+
+    // Step 3: Generate completely new experiences if steps 1 & 2 didn't yield results
+    console.log(`No suitable user or seed experiences found/selected. Generating new ones for area near ${latitude}, ${longitude}`);
+
+    // Fetch nearby points of interest
+    // Combine results from general tourist attractions and specific types
+    const nearbyTouristAttractions = await getNearbyPlaces(latitude, longitude); // Radius defined in function
+    const additionalAttractions = await searchForAdditionalAttractions(latitude, longitude); // Radius defined in function
+
+    let allNearbyPlaces = [...nearbyTouristAttractions, ...additionalAttractions];
+
+    // Remove duplicates based on placeId (prioritize keeping first encountered)
+    const uniqueNearbyPlaces = Array.from(
+      new Map(allNearbyPlaces.map(item => [item.placeId, item])).values()
     );
 
-    if (allAttractions.length === 0) {
-      return res.status(200).json({ message: "No significant attractions found in this area." });
+    console.log(`Found ${uniqueNearbyPlaces.length} unique nearby places for generation.`);
+
+    if (uniqueNearbyPlaces.length < 2) { // Need at least 2 places to create a tour
+      return res.status(404).json({ message: "Not enough unique points of interest found nearby to generate tours." });
     }
 
-    // Generate diverse experiences using Gemini
-    const generatedExperiences = await fetchGeminiExperiences(allAttractions, lat, lon);
+    // Generate diverse experiences using Gemini and the unique places
+    const generatedExperiences = await fetchGeminiExperiences(uniqueNearbyPlaces, latitude, longitude);
 
-    if (generatedExperiences.length === 0) {
-      return res.status(200).json({ message: "Could not generate any experiences for this area." });
+    if (!Array.isArray(generatedExperiences) || generatedExperiences.length === 0) {
+        console.error("Failed to generate any tour experiences from Gemini.");
+      return res.status(500).json({ error: "Failed to generate tour experiences. The AI might be unavailable or could not process the request." });
     }
 
-    // Filter and score experiences based on user proximity and preferences
-    const filteredExperiences = filterExperiencesForUser(generatedExperiences, lat, lon, { preferredCategories });
+    // Format the newly generated experiences - THESE WILL BE SAVED AS SEEDS
+    const newSeedExperiencesData = generatedExperiences.map(exp => ({
+      title: exp.title || "Generated Tour Experience", // Default title
+      description: exp.description || "An exploration of local points of interest.", // Default description
+      locations: exp.locations.map(loc => ({ // Validate location data
+        locationName: loc.locationName || "Unknown Location",
+        lat: !isNaN(parseFloat(loc.lat)) ? parseFloat(loc.lat) : null,
+        lon: !isNaN(parseFloat(loc.lon)) ? parseFloat(loc.lon) : null,
+        placeId: loc.placeId || null,
+        types: Array.isArray(loc.types) ? loc.types : [],
+        rating: loc.rating || null,
+        vicinity: loc.vicinity || null,
+        photos: Array.isArray(loc.photos) ? loc.photos : [],
+        narration: loc.narration || `Explore ${loc.locationName || 'this interesting place'}.`
+      })).filter(loc => loc.lat !== null && loc.lon !== null), // Filter out locations without valid coords
+      user_id: user_id, // Record who triggered the generation
+      is_seed: true,    // Save as a reusable seed
+      times_shown: 0,   // Initialize show count for the seed
+      created_at: new Date(),
+      location_center: { // Store the center point used for generation/querying
+        lat: latitude,
+        lon: longitude
+      },
+      source_experience_id: null // Seeds don't have a source
+    })).filter(exp => exp.locations.length >= 2); // Ensure final experiences still have enough valid locations
 
-    // Respond with the generated and filtered experiences
-    return res.status(200).json(filteredExperiences);
+     if (newSeedExperiencesData.length === 0) {
+         console.error("Generated experiences were invalid or filtered out (e.g., missing locations).");
+         return res.status(500).json({ error: "Failed to generate valid tour experiences after processing." });
+     }
+
+    // Save the NEW experiences to the database ONCE as seeds
+    const savedNewSeedExperiences = await Experience.insertMany(newSeedExperiencesData);
+    console.log(`Saved ${savedNewSeedExperiences.length} new seed experiences triggered by user ${user_id}`);
+
+    // Return the newly created SEED experiences directly to the user who requested them
+    res.json({
+      experiences: savedNewSeedExperiences, // Return the seeds themselves
+      source: "newly_generated"
+    });
 
   } catch (error) {
-    console.error("Error processing request:", error);
-    return res.status(500).json({ error: "Failed to process your request." });
+    console.error("Unhandled error in POST /api/experiences:", error);
+    // Log specific details based on error type if possible
+    if (error.name === 'ValidationError') {
+         res.status(400).json({ error: "Data validation failed", details: error.message });
+    } else if (error.code === 11000) { // Example: MongoDB duplicate key error
+        res.status(409).json({ error: "Conflict creating resource", details: error.message });
+    }
+     else {
+        res.status(500).json({ error: "Internal server error while processing experiences", details: error.message });
+    }
   }
 });
 
+// --- Export Router ---
 export default router;
