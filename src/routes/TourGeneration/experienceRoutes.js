@@ -61,7 +61,7 @@ const getLocationNameFromCoordinates = async (lat, lon) => {
 };
 
 // Enhanced to fetch and categorize places (primarily tourist attractions)
-const getNearbyPlaces = async (lat, lon, radius = 5000) => { // Default radius 5km
+const getNearbyPlaces = async (lat, lon, radius = 15000) => { // Default radius 5km
   const type = 'attractions'; // Using a generic type for cache
   try {
     // Check cache first
