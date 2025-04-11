@@ -64,7 +64,7 @@ const getNearbyPlaces = async (lat, lon, radius = 10000) => {
     const response = await axios.get(
       `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lon}&radius=${radius}&type=tourist_attraction&key=${process.env.GOOGLE_PLACES_API_KEY}`
     );
-    const places = response.data.results.map(place => ({
+    const places = response.data?.results?.map(place => ({ // Added optional chaining
       locationName: place.name,
       lat: place.geometry.location.lat,
       lon: place.geometry.location.lng,
@@ -72,7 +72,7 @@ const getNearbyPlaces = async (lat, lon, radius = 10000) => {
       types: place.types,
       rating: place.rating || "N/A",
       vicinity: place.vicinity || null
-    }));
+    })) || []; // Ensure an empty array if no results
     placesCache.set(type, lat, lon, radius, places);
     return places;
   } catch (error) {
@@ -94,7 +94,7 @@ const searchForAdditionalAttractions = async (lat, lon, radius = 20000) => {
     const response = await axios.get(
       `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lon}&radius=${radius}&type=${searchTypes}&key=${process.env.GOOGLE_PLACES_API_KEY}`
     );
-    const attractions = response.data.results.map(place => ({
+    const attractions = response.data?.results?.map(place => ({ // Added optional chaining
       locationName: place.name,
       lat: place.geometry.location.lat,
       lon: place.geometry.location.lng,
@@ -102,7 +102,7 @@ const searchForAdditionalAttractions = async (lat, lon, radius = 20000) => {
       types: place.types,
       rating: place.rating || "N/A",
       vicinity: place.vicinity || null
-    }));
+    })) || []; // Ensure an empty array if no results
     placesCache.set(type, lat, lon, radius, attractions);
     return attractions;
   } catch (error) {
@@ -341,7 +341,7 @@ Constraints:
         themePrompt = themePrompt.replace(/a transition hint towards the next stop \(if applicable\)/g, "some interesting details");
       }
       const locationObjects = locationSet.locations.map(loc => `{
-      "locationName": "${loc.locationName.replace(/"/g, '\\"')}",
+      "locationName": "${loc.locationName?.replace(/"/g, '\\"') || ''}", // Added nullish coalescing and optional chaining
       "lat": ${loc.lat},
       "lon": ${loc.lon},
       "placeId": "${loc.placeId || ''}",
@@ -374,7 +374,7 @@ Constraints:
             const enhancedLocations = await Promise.all(experience.locations.map(async (genLocation) => {
               const inputLocation = locationSet.locations.find(inputLoc =>
                 (genLocation.placeId && inputLoc.placeId === genLocation.placeId) ||
-                (inputLoc.locationName.toLowerCase() === genLocation.locationName.toLowerCase() &&
+                (inputLoc.locationName?.toLowerCase() === genLocation.locationName?.toLowerCase() && // Added optional chaining
                   Math.abs(inputLoc.lat - genLocation.lat) < 0.001 &&
                   Math.abs(inputLoc.lon - genLocation.lon) < 0.001)
               );
