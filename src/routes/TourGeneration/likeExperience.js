@@ -1,7 +1,7 @@
 import express from 'express';
 import mongoose from 'mongoose';
-import Experience from '../models/experience.js';
-import User from '../models/user.js';
+import Experience from '../../models/experiences/Experience.js';
+import User from '../../models/userModel/User.js';
 
 const router = express.Router();
 
