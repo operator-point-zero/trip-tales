@@ -713,367 +713,154 @@ async function isUrbanLocation(lat, lon) {
 // --- Main API Route ---
 
 // POST /api/experiences - Main route to fetch or generate experiences
-// router.post("/", rateLimit, async (req, res) => {
-//   try {
-//     const { lat, lon, user_id, preferences } = req.body;
-//     if (lat === undefined || lon === undefined || !user_id) { // Check for undefined too
-//       return res.status(400).json({ error: "Latitude, longitude, and user_id are required." });
-//     }
-
-//     const latitude = parseFloat(lat);
-//     const longitude = parseFloat(lon);
-
-//      if (isNaN(latitude) || isNaN(longitude)) {
-//         return res.status(400).json({ error: "Invalid latitude or longitude values." });
-//      }
-
-
-//     // Parse user preferences safely
-//     let userPrefs = {};
-//     if (preferences) {
-//         try {
-//             userPrefs = typeof preferences === 'string' ? JSON.parse(preferences) : preferences;
-//         } catch (e) {
-//             console.warn("Could not parse user preferences JSON:", preferences);
-//             // Proceed without preferences if parsing fails
-//         }
-//     }
-
-
-//     // Determine area granularity based on location type (urban/rural)
-//     const isUrban = await isUrbanLocation(latitude, longitude);
-//     // Define bounding box size based on density (degrees lat/lon)
-//     // Approx 0.1 deg ~ 11km. Adjust these values based on desired area size.
-//     const boxSizeLat = isUrban ? 0.07 : 0.15; // Smaller lat range for urban
-//     const boxSizeLon = isUrban ? 0.1 : 0.2; // Smaller lon range for urban
-
-
-//     // Define the geographic bounding box for queries
-//     const geoQueryBounds = {
-//         "location_center.lat": { $gte: latitude - boxSizeLat, $lte: latitude + boxSizeLat },
-//         "location_center.lon": { $gte: longitude - boxSizeLon, $lte: longitude + boxSizeLon },
-//     };
-
-
-//     // Step 1: Check if we already have non-seed experiences for this EXACT user in the area
-//     const userSpecificExperiences = await Experience.find({
-//       user_id: user_id,
-//       is_seed: false, // Look for user-specific copies
-//       ...geoQueryBounds // Apply geographic filter
-//     }).limit(15).sort({ created_at: -1 }); // Get latest user copies
-
-//     if (userSpecificExperiences.length > 0) {
-//       console.log(`Returning ${userSpecificExperiences.length} existing user-specific experiences for user ${user_id}`);
-//       return res.json({ experiences: userSpecificExperiences, source: "user_cache" });
-//     }
-
-//     // Step 2: Check if we have suitable seed experiences in the area
-//     // Find seeds the user hasn't already explicitly cloned (if source_experience_id is reliably set)
-//     const existingUserSourceIds = userSpecificExperiences // Re-use previous query result if needed
-//         .map(exp => exp.source_experience_id)
-//         .filter(id => id); // Filter out null/undefined
-
-//     const seedExperiences = await Experience.find({
-//       is_seed: true,
-//       ...geoQueryBounds, // Apply geographic filter
-//       _id: { $nin: existingUserSourceIds } // Exclude seeds already cloned by this user
-//     }).sort({ times_shown: 1 }).limit(30); // Get more seeds to allow for better filtering
-
-//     // If we have enough diverse seed experiences, filter, select, and clone for this user
-//     if (seedExperiences.length >= 5) { // Need a decent pool to select from
-//       console.log(`Found ${seedExperiences.length} potential seed experiences for area near ${latitude}, ${longitude}`);
-
-//       // Filter and prioritize seed experiences based on proximity, diversity, and preferences
-//       const filteredSeedExperiences = filterExperiencesForUser(
-//         seedExperiences,
-//         latitude,
-//         longitude,
-//         userPrefs
-//       );
-
-//       // Take top N (e.g., 10) most relevant experiences from the filtered list
-//       const selectedSeeds = filteredSeedExperiences.slice(0, 10);
-
-//       if (selectedSeeds.length > 0) {
-//             // Update usage count for the selected seed experiences
-//             const seedIdsToUpdate = selectedSeeds.map(exp => exp._id);
-//             await Experience.updateMany(
-//                 { _id: { $in: seedIdsToUpdate } },
-//                 { $inc: { times_shown: 1 } }
-//             );
-
-//             // Create user-specific clones (new documents)
-//             const userClonesData = selectedSeeds.map(seed => ({
-//                 ...seed.toObject(), // Convert Mongoose doc to plain object
-//                 _id: undefined, // Let MongoDB generate a new unique ID
-//                 user_id: user_id, // Assign to the current user
-//                 is_seed: false, // Mark as a user-specific copy
-//                 source_experience_id: seed._id, // Link back to the original seed
-//                 created_at: new Date(), // Set creation time for the clone
-//                 times_shown: 1, // Initialize show count for this user copy (or maybe 0?)
-//                 relevanceScore: undefined // Remove score used for filtering seeds
-//             }));
-
-//             // Save the user-specific clones to the database
-//             const savedUserClones = await Experience.insertMany(userClonesData);
-//             console.log(`Saved ${savedUserClones.length} user-specific clones for user ${user_id} from seeds.`);
-
-//             return res.json({
-//                 experiences: savedUserClones, // Return the newly created clones
-//                 source: "customized_from_seed"
-//             });
-//       } else {
-//            console.log("Filtering removed all seed candidates. Proceeding to generate new ones.");
-//       }
-//     }
-
-//     // Step 3: Generate completely new experiences if steps 1 & 2 didn't yield results
-//     console.log(`No suitable user or seed experiences found/selected. Generating new ones for area near ${latitude}, ${longitude}`);
-
-//     // Fetch nearby points of interest
-//     // Combine results from general tourist attractions and specific types
-//     const nearbyTouristAttractions = await getNearbyPlaces(latitude, longitude); // Radius defined in function
-//     const additionalAttractions = await searchForAdditionalAttractions(latitude, longitude); // Radius defined in function
-
-//     let allNearbyPlaces = [...nearbyTouristAttractions, ...additionalAttractions];
-
-//     // Remove duplicates based on placeId (prioritize keeping first encountered)
-//     const uniqueNearbyPlaces = Array.from(
-//       new Map(allNearbyPlaces.map(item => [item.placeId, item])).values()
-//     );
-
-//     console.log(`Found ${uniqueNearbyPlaces.length} unique nearby places for generation.`);
-
-//     if (uniqueNearbyPlaces.length < 2) { // Need at least 2 places to create a tour
-//       return res.status(404).json({ message: "Not enough unique points of interest found nearby to generate tours." });
-//     }
-
-//     // Generate diverse experiences using Gemini and the unique places
-//     const generatedExperiences = await fetchGeminiExperiences(uniqueNearbyPlaces, latitude, longitude);
-
-//     if (!Array.isArray(generatedExperiences) || generatedExperiences.length === 0) {
-//         console.error("Failed to generate any tour experiences from Gemini.");
-//       return res.status(500).json({ error: "Failed to generate tour experiences. The AI might be unavailable or could not process the request." });
-//     }
-
-//     // Format the newly generated experiences - THESE WILL BE SAVED AS SEEDS
-//     const newSeedExperiencesData = generatedExperiences.map(exp => ({
-//       title: exp.title || "Generated Tour Experience", // Default title
-//       description: exp.description || "An exploration of local points of interest.", // Default description
-//       locations: exp.locations.map(loc => ({ // Validate location data
-//         locationName: loc.locationName || "Unknown Location",
-//         lat: !isNaN(parseFloat(loc.lat)) ? parseFloat(loc.lat) : null,
-//         lon: !isNaN(parseFloat(loc.lon)) ? parseFloat(loc.lon) : null,
-//         placeId: loc.placeId || null,
-//         types: Array.isArray(loc.types) ? loc.types : [],
-//         rating: loc.rating || null,
-//         vicinity: loc.vicinity || null,
-//         photos: Array.isArray(loc.photos) ? loc.photos : [],
-//         narration: loc.narration || `Explore ${loc.locationName || 'this interesting place'}.`
-//       })).filter(loc => loc.lat !== null && loc.lon !== null), // Filter out locations without valid coords
-//       user_id: user_id, // Record who triggered the generation
-//       is_seed: true,    // Save as a reusable seed
-//       times_shown: 0,   // Initialize show count for the seed
-//       created_at: new Date(),
-//       location_center: { // Store the center point used for generation/querying
-//         lat: latitude,
-//         lon: longitude
-//       },
-//       source_experience_id: null // Seeds don't have a source
-//     })).filter(exp => exp.locations.length >= 2); // Ensure final experiences still have enough valid locations
-
-//      if (newSeedExperiencesData.length === 0) {
-//          console.error("Generated experiences were invalid or filtered out (e.g., missing locations).");
-//          return res.status(500).json({ error: "Failed to generate valid tour experiences after processing." });
-//      }
-
-//     // Save the NEW experiences to the database ONCE as seeds
-//     const savedNewSeedExperiences = await Experience.insertMany(newSeedExperiencesData);
-//     console.log(`Saved ${savedNewSeedExperiences.length} new seed experiences triggered by user ${user_id}`);
-
-//     // Return the newly created SEED experiences directly to the user who requested them
-//     res.json({
-//       experiences: savedNewSeedExperiences, // Return the seeds themselves
-//       source: "newly_generated"
-//     });
-
-//   } catch (error) {
-//     console.error("Unhandled error in POST /api/experiences:", error);
-//     // Log specific details based on error type if possible
-//     if (error.name === 'ValidationError') {
-//          res.status(400).json({ error: "Data validation failed", details: error.message });
-//     } else if (error.code === 11000) { // Example: MongoDB duplicate key error
-//         res.status(409).json({ error: "Conflict creating resource", details: error.message });
-//     }
-//      else {
-//         res.status(500).json({ error: "Internal server error while processing experiences", details: error.message });
-//     }
-//   }
-// });
-
-// Updated POST route handler with more aggressive caching and fallback logic
 router.post("/", rateLimit, async (req, res) => {
   try {
     const { lat, lon, user_id, preferences } = req.body;
-    if (lat === undefined || lon === undefined || !user_id) {
+    if (lat === undefined || lon === undefined || !user_id) { // Check for undefined too
       return res.status(400).json({ error: "Latitude, longitude, and user_id are required." });
     }
 
     const latitude = parseFloat(lat);
     const longitude = parseFloat(lon);
 
-    if (isNaN(latitude) || isNaN(longitude)) {
-      return res.status(400).json({ error: "Invalid latitude or longitude values." });
-    }
+     if (isNaN(latitude) || isNaN(longitude)) {
+        return res.status(400).json({ error: "Invalid latitude or longitude values." });
+     }
+
 
     // Parse user preferences safely
     let userPrefs = {};
     if (preferences) {
-      try {
-        userPrefs = typeof preferences === 'string' ? JSON.parse(preferences) : preferences;
-      } catch (e) {
-        console.warn("Could not parse user preferences JSON:", preferences);
-      }
+        try {
+            userPrefs = typeof preferences === 'string' ? JSON.parse(preferences) : preferences;
+        } catch (e) {
+            console.warn("Could not parse user preferences JSON:", preferences);
+            // Proceed without preferences if parsing fails
+        }
     }
 
-    // MUCH larger bounding box to ensure we find existing experiences
-    // (You can adjust these values based on how far you consider "same area")
-    const boxSizeLat = 0.2;  // About 22km north/south
-    const boxSizeLon = 0.3;  // About 33km east/west at equator, less at higher latitudes
-    
-    console.log(`Looking for experiences with center point within: lat ±${boxSizeLat}, lon ±${boxSizeLon} from ${latitude}, ${longitude}`);
+
+    // Determine area granularity based on location type (urban/rural)
+    const isUrban = await isUrbanLocation(latitude, longitude);
+    // Define bounding box size based on density (degrees lat/lon)
+    // Approx 0.1 deg ~ 11km. Adjust these values based on desired area size.
+    const boxSizeLat = isUrban ? 0.07 : 0.15; // Smaller lat range for urban
+    const boxSizeLon = isUrban ? 0.1 : 0.2; // Smaller lon range for urban
+
 
     // Define the geographic bounding box for queries
     const geoQueryBounds = {
-      "location_center.lat": { $gte: latitude - boxSizeLat, $lte: latitude + boxSizeLat },
-      "location_center.lon": { $gte: longitude - boxSizeLon, $lte: longitude + boxSizeLon },
+        "location_center.lat": { $gte: latitude - boxSizeLat, $lte: latitude + boxSizeLat },
+        "location_center.lon": { $gte: longitude - boxSizeLon, $lte: longitude + boxSizeLon },
     };
 
-    // First check: Do we have ANY seed experiences in this area at all?
-    const totalSeedCount = await Experience.countDocuments({
-      is_seed: true,
-      ...geoQueryBounds
-    });
 
-    console.log(`Found ${totalSeedCount} total seed experiences in the search area`);
-
-    // If seeds exist in this area, NEVER generate new ones
-    const skipGeneration = totalSeedCount > 0;
-    
-    // Track if we found anything to return to the user
-    let experiencesFound = false;
-
-    // Step 1: Check for user-specific experiences
+    // Step 1: Check if we already have non-seed experiences for this EXACT user in the area
     const userSpecificExperiences = await Experience.find({
       user_id: user_id,
-      is_seed: false,
-      ...geoQueryBounds
-    }).limit(15).sort({ created_at: -1 });
+      is_seed: false, // Look for user-specific copies
+      ...geoQueryBounds // Apply geographic filter
+    }).limit(15).sort({ created_at: -1 }); // Get latest user copies
 
     if (userSpecificExperiences.length > 0) {
       console.log(`Returning ${userSpecificExperiences.length} existing user-specific experiences for user ${user_id}`);
       return res.json({ experiences: userSpecificExperiences, source: "user_cache" });
     }
 
-    // Step 2: Get ALL seed experiences in the area
-    if (skipGeneration) {
-      // Get ALL seeds in the area - we know they exist from the count above
-      const allAreaSeeds = await Experience.find({
-        is_seed: true,
-        ...geoQueryBounds
-      }).limit(30).sort({ times_shown: 1 });
-      
-      console.log(`Found ${allAreaSeeds.length} seed experiences to consider for user ${user_id}`);
+    // Step 2: Check if we have suitable seed experiences in the area
+    // Find seeds the user hasn't already explicitly cloned (if source_experience_id is reliably set)
+    const existingUserSourceIds = userSpecificExperiences // Re-use previous query result if needed
+        .map(exp => exp.source_experience_id)
+        .filter(id => id); // Filter out null/undefined
 
-      if (allAreaSeeds.length > 0) {
-        // Apply filtering to prioritize, but don't exclude any if we have few
-        const filteredSeeds = filterExperiencesForUser(
-          allAreaSeeds,
-          latitude,
-          longitude,
-          userPrefs
-        );
-        
-        // Always use some seeds - either filtered or original if filtering removed too many
-        const selectedSeeds = filteredSeeds.length >= 3 
-          ? filteredSeeds.slice(0, 10) 
-          : allAreaSeeds.slice(0, 10);
-        
-        console.log(`Selected ${selectedSeeds.length} seeds for user ${user_id}`);
-        
-        // Update usage count for the selected seeds
-        const seedIdsToUpdate = selectedSeeds.map(exp => exp._id);
-        await Experience.updateMany(
-          { _id: { $in: seedIdsToUpdate } },
-          { $inc: { times_shown: 1 } }
-        );
-        
-        // Create user-specific clones
-        const userClonesData = selectedSeeds.map(seed => ({
-          ...seed.toObject(),
-          _id: undefined,
-          user_id: user_id,
-          is_seed: false,
-          source_experience_id: seed._id,
-          created_at: new Date(),
-          times_shown: 1,
-          relevanceScore: undefined
-        }));
-        
-        const savedUserClones = await Experience.insertMany(userClonesData);
-        console.log(`Saved ${savedUserClones.length} user-specific clones for user ${user_id}`);
-        
-        return res.json({
-          experiences: savedUserClones,
-          source: "customized_from_seed"
-        });
+    const seedExperiences = await Experience.find({
+      is_seed: true,
+      ...geoQueryBounds, // Apply geographic filter
+      _id: { $nin: existingUserSourceIds } // Exclude seeds already cloned by this user
+    }).sort({ times_shown: 1 }).limit(30); // Get more seeds to allow for better filtering
+
+    // If we have enough diverse seed experiences, filter, select, and clone for this user
+    if (seedExperiences.length >= 5) { // Need a decent pool to select from
+      console.log(`Found ${seedExperiences.length} potential seed experiences for area near ${latitude}, ${longitude}`);
+
+      // Filter and prioritize seed experiences based on proximity, diversity, and preferences
+      const filteredSeedExperiences = filterExperiencesForUser(
+        seedExperiences,
+        latitude,
+        longitude,
+        userPrefs
+      );
+
+      // Take top N (e.g., 10) most relevant experiences from the filtered list
+      const selectedSeeds = filteredSeedExperiences.slice(0, 10);
+
+      if (selectedSeeds.length > 0) {
+            // Update usage count for the selected seed experiences
+            const seedIdsToUpdate = selectedSeeds.map(exp => exp._id);
+            await Experience.updateMany(
+                { _id: { $in: seedIdsToUpdate } },
+                { $inc: { times_shown: 1 } }
+            );
+
+            // Create user-specific clones (new documents)
+            const userClonesData = selectedSeeds.map(seed => ({
+                ...seed.toObject(), // Convert Mongoose doc to plain object
+                _id: undefined, // Let MongoDB generate a new unique ID
+                user_id: user_id, // Assign to the current user
+                is_seed: false, // Mark as a user-specific copy
+                source_experience_id: seed._id, // Link back to the original seed
+                created_at: new Date(), // Set creation time for the clone
+                times_shown: 1, // Initialize show count for this user copy (or maybe 0?)
+                relevanceScore: undefined // Remove score used for filtering seeds
+            }));
+
+            // Save the user-specific clones to the database
+            const savedUserClones = await Experience.insertMany(userClonesData);
+            console.log(`Saved ${savedUserClones.length} user-specific clones for user ${user_id} from seeds.`);
+
+            return res.json({
+                experiences: savedUserClones, // Return the newly created clones
+                source: "customized_from_seed"
+            });
+      } else {
+           console.log("Filtering removed all seed candidates. Proceeding to generate new ones.");
       }
     }
 
-    // Only reach here if (a) no experiences in area at all or 
-    // (b) seeds existed but something failed in processing them
-    console.log(`${skipGeneration ? "Error processing existing seeds" : "No seeds found in area"}. ${skipGeneration ? "Will NOT generate new experiences." : "Will generate new experiences."}`);
-    
-    // If we found seeds earlier but somehow failed to process them, don't generate new ones
-    if (skipGeneration) {
-      return res.status(500).json({ 
-        error: "Failed to process existing experiences in this area. Please try again." 
-      });
-    }
-    
-    // Generation path - only reached if we have no seeds for this area
-    console.log(`Generating new experiences for area near ${latitude}, ${longitude}`);
-    
+    // Step 3: Generate completely new experiences if steps 1 & 2 didn't yield results
+    console.log(`No suitable user or seed experiences found/selected. Generating new ones for area near ${latitude}, ${longitude}`);
+
     // Fetch nearby points of interest
-    const nearbyTouristAttractions = await getNearbyPlaces(latitude, longitude);
-    const additionalAttractions = await searchForAdditionalAttractions(latitude, longitude);
-    
+    // Combine results from general tourist attractions and specific types
+    const nearbyTouristAttractions = await getNearbyPlaces(latitude, longitude); // Radius defined in function
+    const additionalAttractions = await searchForAdditionalAttractions(latitude, longitude); // Radius defined in function
+
     let allNearbyPlaces = [...nearbyTouristAttractions, ...additionalAttractions];
-    
-    // Remove duplicates
+
+    // Remove duplicates based on placeId (prioritize keeping first encountered)
     const uniqueNearbyPlaces = Array.from(
       new Map(allNearbyPlaces.map(item => [item.placeId, item])).values()
     );
-    
+
     console.log(`Found ${uniqueNearbyPlaces.length} unique nearby places for generation.`);
-    
-    if (uniqueNearbyPlaces.length < 2) {
+
+    if (uniqueNearbyPlaces.length < 2) { // Need at least 2 places to create a tour
       return res.status(404).json({ message: "Not enough unique points of interest found nearby to generate tours." });
     }
-    
-    // Generate new experiences
+
+    // Generate diverse experiences using Gemini and the unique places
     const generatedExperiences = await fetchGeminiExperiences(uniqueNearbyPlaces, latitude, longitude);
-    
+
     if (!Array.isArray(generatedExperiences) || generatedExperiences.length === 0) {
-      console.error("Failed to generate any tour experiences from Gemini.");
-      return res.status(500).json({ error: "Failed to generate tour experiences." });
+        console.error("Failed to generate any tour experiences from Gemini.");
+      return res.status(500).json({ error: "Failed to generate tour experiences. The AI might be unavailable or could not process the request." });
     }
-    
-    // Format and save as seeds
+
+    // Format the newly generated experiences - THESE WILL BE SAVED AS SEEDS
     const newSeedExperiencesData = generatedExperiences.map(exp => ({
-      title: exp.title || "Generated Tour Experience",
-      description: exp.description || "An exploration of local points of interest.",
-      locations: exp.locations.map(loc => ({
+      title: exp.title || "Generated Tour Experience", // Default title
+      description: exp.description || "An exploration of local points of interest.", // Default description
+      locations: exp.locations.map(loc => ({ // Validate location data
         locationName: loc.locationName || "Unknown Location",
         lat: !isNaN(parseFloat(loc.lat)) ? parseFloat(loc.lat) : null,
         lon: !isNaN(parseFloat(loc.lon)) ? parseFloat(loc.lon) : null,
@@ -1083,50 +870,44 @@ router.post("/", rateLimit, async (req, res) => {
         vicinity: loc.vicinity || null,
         photos: Array.isArray(loc.photos) ? loc.photos : [],
         narration: loc.narration || `Explore ${loc.locationName || 'this interesting place'}.`
-      })).filter(loc => loc.lat !== null && loc.lon !== null),
-      user_id: null, // No specific user owns these seeds
-      is_seed: true,
-      times_shown: 0,
+      })).filter(loc => loc.lat !== null && loc.lon !== null), // Filter out locations without valid coords
+      user_id: user_id, // Record who triggered the generation
+      is_seed: true,    // Save as a reusable seed
+      times_shown: 0,   // Initialize show count for the seed
       created_at: new Date(),
-      location_center: {
+      location_center: { // Store the center point used for generation/querying
         lat: latitude,
         lon: longitude
       },
-      source_experience_id: null
-    })).filter(exp => exp.locations.length >= 2);
-    
-    if (newSeedExperiencesData.length === 0) {
-      console.error("Generated experiences were invalid or filtered out.");
-      return res.status(500).json({ error: "Failed to generate valid tour experiences after processing." });
-    }
-    
-    // Save new seeds
+      source_experience_id: null // Seeds don't have a source
+    })).filter(exp => exp.locations.length >= 2); // Ensure final experiences still have enough valid locations
+
+     if (newSeedExperiencesData.length === 0) {
+         console.error("Generated experiences were invalid or filtered out (e.g., missing locations).");
+         return res.status(500).json({ error: "Failed to generate valid tour experiences after processing." });
+     }
+
+    // Save the NEW experiences to the database ONCE as seeds
     const savedNewSeedExperiences = await Experience.insertMany(newSeedExperiencesData);
     console.log(`Saved ${savedNewSeedExperiences.length} new seed experiences triggered by user ${user_id}`);
-    
-    // Create user copies of these new seeds
-    const userExperiencesData = savedNewSeedExperiences.map(seed => ({
-      ...seed.toObject(),
-      _id: undefined,
-      user_id: user_id,
-      is_seed: false,
-      source_experience_id: seed._id,
-      created_at: new Date(),
-      times_shown: 1
-    }));
-    
-    const savedUserExperiences = await Experience.insertMany(userExperiencesData);
-    console.log(`Saved ${savedUserExperiences.length} user-specific experiences for user ${user_id} from new seeds.`);
-    
-    // Return the user copies, not the seeds
+
+    // Return the newly created SEED experiences directly to the user who requested them
     res.json({
-      experiences: savedUserExperiences,
-      source: "new_from_generated_seed"
+      experiences: savedNewSeedExperiences, // Return the seeds themselves
+      source: "newly_generated"
     });
 
   } catch (error) {
-    console.error("Error in POST /api/experiences:", error);
-    res.status(500).json({ error: "Internal server error", details: error.message });
+    console.error("Unhandled error in POST /api/experiences:", error);
+    // Log specific details based on error type if possible
+    if (error.name === 'ValidationError') {
+         res.status(400).json({ error: "Data validation failed", details: error.message });
+    } else if (error.code === 11000) { // Example: MongoDB duplicate key error
+        res.status(409).json({ error: "Conflict creating resource", details: error.message });
+    }
+     else {
+        res.status(500).json({ error: "Internal server error while processing experiences", details: error.message });
+    }
   }
 });
 
