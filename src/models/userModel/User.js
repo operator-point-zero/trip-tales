@@ -41,6 +41,8 @@ const UserSchema = new mongoose.Schema(
     },
 
     purchasedTours: [{ type: mongoose.Schema.Types.ObjectId, ref: "Tour" }],
+    favorites: [{ type: mongoose.Schema.Types.ObjectId, ref: "Experience" }],
+
   },
   { timestamps: true }
 );
