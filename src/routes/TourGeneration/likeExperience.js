@@ -1,13 +1,11 @@
 import express from 'express';
 import User from "../../models/userModel/User.js";
 import Experience from "../../models/experiences/Experience.js";
-// Note: We'll still use authMiddleware for security, but we'll get userId from the request body
-import { authMiddleware } from '../../middleware/authMiddleware.js';
 
 const router = express.Router();
 
-// Add an experience to favorites - now with both IDs in request body
-router.post('/favorites', authMiddleware, async (req, res) => {
+// Add an experience to favorites
+router.post('/favorites', async (req, res) => {
   try {
     const { experienceId, userId } = req.body;
     
@@ -57,8 +55,8 @@ router.post('/favorites', authMiddleware, async (req, res) => {
   }
 });
 
-// Remove an experience from favorites - now with both IDs in request body
-router.delete('/favorites', authMiddleware, async (req, res) => {
+// Remove an experience from favorites
+router.delete('/favorites', async (req, res) => {
   try {
     const { experienceId, userId } = req.body;
     
@@ -91,8 +89,8 @@ router.delete('/favorites', authMiddleware, async (req, res) => {
   }
 });
 
-// Get all favorites for a user - now with userId in request body
-router.post('/get-favorites', authMiddleware, async (req, res) => {
+// Get all favorites for a user
+router.post('/get-favorites', async (req, res) => {
   try {
     const { userId } = req.body;
     
@@ -117,7 +115,7 @@ router.post('/get-favorites', authMiddleware, async (req, res) => {
 });
 
 // Get all users who favorited an experience
-router.post('/favorited-by', authMiddleware, async (req, res) => {
+router.post('/favorited-by', async (req, res) => {
   try {
     const { experienceId } = req.body;
     
@@ -143,7 +141,7 @@ router.post('/favorited-by', authMiddleware, async (req, res) => {
 });
 
 // Check if an experience is in favorites
-router.post('/check-favorite', authMiddleware, async (req, res) => {
+router.post('/check-favorite', async (req, res) => {
   try {
     const { experienceId, userId } = req.body;
     
