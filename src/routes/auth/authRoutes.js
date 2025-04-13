@@ -199,9 +199,12 @@ router.post("/login", async (req, res) => {
 });
 
 // ✅ Delete User Account
-router.delete("/delete-account", verifyToken, async (req, res) => {
+router.post("/delete-account", async (req, res) => {
   try {
-    const user = await User.findByIdAndDelete(req.user.id);
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ error: "User ID is required" });
+
+    const user = await User.findByIdAndDelete(userId);
     if (!user) return res.status(404).json({ error: "User not found" });
 
     const deleteHtml = `
@@ -210,13 +213,20 @@ router.delete("/delete-account", verifyToken, async (req, res) => {
       <p>Take care! 💙</p>
       <p>🚀 The Tour Guide Team</p>
     `;
-    await sendEmail(user.email, "👋 Account Deletion Confirmation", deleteHtml);
+
+    try {
+      await sendEmail(user.email, "👋 Account Deletion Confirmation", deleteHtml);
+    } catch (emailErr) {
+      console.error("Failed to send deletion email:", emailErr);
+    }
 
     res.json({ message: "Account deleted successfully" });
   } catch (error) {
+    console.error("Error deleting account:", error);
     res.status(500).json({ error: "Failed to delete account" });
   }
 });
+
 
 export default router;
 
