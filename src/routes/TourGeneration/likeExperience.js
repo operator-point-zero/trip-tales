@@ -77,69 +77,98 @@ router.post('/check-favorite', async (req, res) => {
   }
 });
 
-// GET /favorites/:userId — Get all favorited experiences for a user
+// Assuming 'router', 'User', 'Experience' are already defined and required/imported
 // GET /favorites/:userId — Get all favorited experiences for a user
 router.get('/favorites/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
-    
+
     if (!userId) {
       return res.status(400).json({ message: 'userId is required' });
     }
 
+    // First, find the user and get the list of favorite experience IDs
     const user = await User.findById(userId);
+
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
 
+    // If user has no favorites, return empty array early
     if (!user.favorites || user.favorites.length === 0) {
       return res.status(200).json({ favorites: [] });
     }
 
+    // Now query the Experience collection for full details of favorited experiences
     const favoriteExperiences = await Experience.find({
       _id: { $in: user.favorites }
     }).populate({
       path: 'user_id',
       model: 'User',
-      select: 'name profPicUrl'
+      select: 'name profPicUrl' // Corrected based on usage below
     });
 
-    const formattedFavorites = favoriteExperiences.map(exp => {
-      const formattedLocations = (exp.locations || []).map(location => ({
-        _id: location._id.toString(),
-        lat: location.coordinates.lat,
-        lon: location.coordinates.lon,
-        locationName: location.locationName,
-        placeId: location.placeId,
-        types: location.types,
-        vicinity: location.vicinity,
-        rating: parseFloat(location.rating),
-        photos: (location.photos || []).map(photo => ({
-          photo_reference: photo.photo_reference,
-          width: photo.width,
-          height: photo.height
-        })),
-        narration: {
-          text: location.narrationText,
-          language: location.language || 'en',
-          audioUrl: location.audioUrl
-        }
-      }));
+    // Filter out any null/undefined experiences just in case ( belt-and-suspenders check)
+    const validExperiences = favoriteExperiences.filter(exp => exp != null);
 
-      const photos = formattedLocations.flatMap(loc => loc.photos);
-      const locationCount = formattedLocations.length;
+    // Format the data for the client, adding checks for potentially bad data
+    const formattedFavorites = validExperiences.map(exp => {
+      let photos = [];
+      let locationCount = 0;
 
+      // --- Added Check [1]: Ensure exp.locations is an array ---
+      if (Array.isArray(exp.locations)) {
+        locationCount = exp.locations.length; // Calculate count only if it's an array
+
+        exp.locations.forEach((location, index) => {
+          // --- Added Check [2]: Ensure 'location' is a valid object ---
+          // This prevents errors if the array contains null, undefined, or non-objects
+          if (location && typeof location === 'object') {
+
+            // Safe to access location.photos now
+            if (location.photos && Array.isArray(location.photos) && location.photos.length > 0) {
+              photos = photos.concat(location.photos);
+            }
+
+            // --- Hypothetical Check for 'lat' (where the original error likely occurred) ---
+            // Although your formatting code didn't show explicit use of 'lat',
+            // if some other logic *did* use it, a check like this would be needed:
+            /*
+            if (location.lat === undefined || location.lon === undefined) {
+               console.warn(`Experience ${exp._id}, Location index ${index}: Missing lat/lon properties. Location data:`, JSON.stringify(location));
+               // Handle appropriately, e.g., skip calculations needing lat/lon
+            } else {
+               // Proceed with logic using location.lat / location.lon
+            }
+            */
+            // --- End Hypothetical Check ---
+
+          } else {
+            // Log a warning if an invalid item is found in the locations array
+            console.warn(`Experience ${exp._id}: Invalid item found in locations array at index ${index}. Item:`, JSON.stringify(location));
+          }
+        });
+      } else {
+         // Log a warning if exp.locations is present but not an array
+         if (exp.locations !== undefined && exp.locations !== null) {
+             console.warn(`Experience ${exp._id}: 'locations' field is not an array. Value:`, JSON.stringify(exp.locations));
+         }
+         // locationCount remains 0
+      }
+
+      // Format the final object for this experience
       return {
-        _id: exp._id.toString(),
+        _id: exp._id,
         title: exp.title,
         description: exp.description,
-        locations: formattedLocations,
-        photos: photos,
-        locationCount: locationCount,
-        creator: exp.user_id ? {
+        locations: exp.locations, // Still pass the original locations array (or null/undefined if it wasn't an array)
+        photos: photos, // Flattened array of all valid photos found
+        locationCount: locationCount, // Calculated count
+        creator: exp.user_id ? { // Check if user_id (creator) was populated
           name: exp.user_id.name,
-          profPic: exp.user_id.profPicUrl
+          profPic: exp.user_id.profPicUrl // Used profPicUrl from populate select
         } : null,
+        // Using hardcoded values as before (replace if actual data becomes available)
         duration: '2h',
         distance: '2.5',
         price: 'Free',
@@ -149,10 +178,16 @@ router.get('/favorites/:userId', async (req, res) => {
       };
     });
 
-    return res.status(200).json({ favorites: formattedFavorites });
+    // Return the potentially filtered and safely formatted favorites
+    return res.status(200).json({
+      favorites: formattedFavorites
+    });
+
   } catch (error) {
-    console.error('Error fetching favorite experiences:', error);
-    return res.status(500).json({ message: 'Server error' });
+    // Log the detailed error
+    console.error(`Error fetching favorite experiences for user ${req.params.userId}:`, error);
+    // Return a generic server error message
+    return res.status(500).json({ message: 'Server error occurred while fetching favorites.' });
   }
 });
 
