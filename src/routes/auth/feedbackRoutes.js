@@ -8,21 +8,45 @@ const router = express.Router();
 // @route   POST /api/feedback
 // @desc    Submit feedback
 // @access  Public
+// router.post("/", async (req, res) => {
+//     try {
+//         const { userId, name, profPicUrl, message, type } = req.body;
+
+//         if (!name || !message || !type) {
+//             return res.status(400).json({ error: "Name, message, and type are required" });
+//         }
+
+//         const feedback = new Feedback({ userId, name, profPicUrl, message, type });
+//         await feedback.save();
+
+//         res.status(201).json({ message: "Feedback submitted successfully" });
+//     } catch (error) {
+//         console.error("🚨 Error submitting feedback:", error);
+//         res.status(500).json({ error: "Server error", details: error.message });
+//     }
+// });
+
 router.post("/", async (req, res) => {
     try {
         const { userId, name, profPicUrl, message, type } = req.body;
-
+        console.log("Received feedback data:", { userId, name, profPicUrl, message, type });
+        
         if (!name || !message || !type) {
             return res.status(400).json({ error: "Name, message, and type are required" });
         }
-
+        
         const feedback = new Feedback({ userId, name, profPicUrl, message, type });
+        console.log("Created feedback object:", feedback);
+        
         await feedback.save();
-
         res.status(201).json({ message: "Feedback submitted successfully" });
     } catch (error) {
         console.error("🚨 Error submitting feedback:", error);
-        res.status(500).json({ error: "Server error", details: error.message });
+        res.status(500).json({ 
+            error: "Server error", 
+            details: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
     }
 });
 
