@@ -77,4 +77,79 @@ router.post('/check-favorite', async (req, res) => {
   }
 });
 
+// GET /favorites/:userId — Get all favorited experiences for a user
+router.get('/favorites/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    if (!userId) {
+      return res.status(400).json({ message: 'userId is required' });
+    }
+
+    // First, find the user and get the list of favorite experience IDs
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // If user has no favorites, return empty array early
+    if (!user.favorites || user.favorites.length === 0) {
+      return res.status(200).json({ favorites: [] });
+    }
+
+    // Now query the Experience collection for full details of favorited experiences
+    const favoriteExperiences = await Experience.find({
+      _id: { $in: user.favorites }
+    }).populate({
+      path: 'user_id',
+      model: 'User',
+      select: 'name profPicUrl'
+    });
+
+    // Format the data for the client
+    const formattedFavorites = favoriteExperiences.map(exp => {
+      // Get all photos from each location
+      let photos = [];
+      if (exp.locations && exp.locations.length > 0) {
+        exp.locations.forEach(location => {
+          if (location.photos && location.photos.length > 0) {
+            photos = photos.concat(location.photos);
+          }
+        });
+      }
+
+      // Calculate additional properties
+      const locationCount = exp.locations ? exp.locations.length : 0;
+      
+      return {
+        _id: exp._id,
+        title: exp.title,
+        description: exp.description,
+        locations: exp.locations,
+        photos: photos, // Flattened array of all photos
+        locationCount: locationCount,
+        creator: exp.user_id ? {
+          name: exp.user_id.name,
+          profPic: exp.user_id.profPicUrl
+        } : null,
+        // Sample values for UI display (replace with actual calculations if you have the data)
+        duration: '2h',
+        distance: '2.5',
+        price: 'Free',
+        type: 'Tour',
+        createdAt: exp.createdAt,
+        updatedAt: exp.updatedAt
+      };
+    });
+
+    return res.status(200).json({ 
+      favorites: formattedFavorites 
+    });
+  } catch (error) {
+    console.error('Error fetching favorite experiences:', error);
+    return res.status(500).json({ message: 'Server error' });
+  }
+});
+
 export default router;
