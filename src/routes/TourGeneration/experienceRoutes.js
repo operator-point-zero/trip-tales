@@ -1365,7 +1365,7 @@ const rateLimit = (req, res, next) => {
 /* ---------------------------------------------------------------------------
    Main API Route: Using Location Name as Key for Caching Experiences
    --------------------------------------------------------------------------- */
-router.post("/api/experiences", rateLimit, async (req, res) => {
+router.post("/", rateLimit, async (req, res) => {
   try {
     const { lat, lon } = req.body;
     if (!lat || !lon) {
