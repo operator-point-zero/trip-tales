@@ -1020,12 +1020,8 @@ const getLocationPhotos = async (placeId) => {
 };
 
 /* ---------------------------------------------------------------------------
-   Experience Generation Helpers
+   Experience Generation Helpers (Categorization, Selection, Generation)
    --------------------------------------------------------------------------- */
-
-// [For brevity, functions like categorizeAttractions, getWeightedRandomSelection, generateDiverseLocationSets, 
-// and fetchGeminiExperiences are assumed to be similar to your previous implementations.]
-
 const categorizeAttractions = (attractions) => {
   const categories = {
     museums: [],
@@ -1045,8 +1041,8 @@ const categorizeAttractions = (attractions) => {
     let categorized = false;
     if (types.includes("museum")) { categories.museums.push(place); categorized = true; }
     if (types.includes("park") || types.includes("natural_feature")) { categories.nature.push(place); categorized = true; }
-    if (types.includes("church") || types.includes("mosque") || types.includes("temple") || types.includes("hindu_temple") ||
-        types.includes("synagogue") || types.includes("place_of_worship")) { categories.religious.push(place); categorized = true; }
+    if (types.includes("church") || types.includes("mosque") || types.includes("temple") ||
+        types.includes("hindu_temple") || types.includes("synagogue") || types.includes("place_of_worship")) { categories.religious.push(place); categorized = true; }
     if (types.includes("art_gallery") || types.includes("performing_arts_theater")) { categories.arts.push(place); categorized = true; }
     if (types.includes("amusement_park") || types.includes("zoo") || types.includes("aquarium")) { categories.entertainment.push(place); categorized = true; }
     if (types.includes("department_store") || types.includes("shopping_mall")) { categories.shopping.push(place); categorized = true; }
@@ -1175,7 +1171,7 @@ const fetchGeminiExperiences = async (nearbyPlaces, latitude, longitude) => {
     const diverseLocationSets = generateDiverseLocationSets(nearbyPlaces, latitude, longitude, 10, 4);
     if (diverseLocationSets.length === 0) {
       console.error("Failed to generate any diverse location sets from nearby places.");
-      const fallbackPlaces = nearbyPlaces.sort((a,b) => (b.rating || 0) - (a.rating || 0)).slice(0, 4);
+      const fallbackPlaces = nearbyPlaces.sort((a, b) => (b.rating || 0) - (a.rating || 0)).slice(0, 4);
       if (fallbackPlaces.length >= 2) {
         console.log("Using fallback selection of top places.");
         diverseLocationSets.push({ theme: `Highlights of ${locationName}`, locations: fallbackPlaces });
@@ -1271,8 +1267,8 @@ Constraints:
                 inputLoc =>
                   (genLocation.placeId && inputLoc.placeId === genLocation.placeId) ||
                   (inputLoc.locationName.toLowerCase() === genLocation.locationName.toLowerCase() &&
-                  Math.abs(inputLoc.lat - genLocation.lat) < 0.001 &&
-                  Math.abs(inputLoc.lon - genLocation.lon) < 0.001)
+                    Math.abs(inputLoc.lat - genLocation.lat) < 0.001 &&
+                    Math.abs(inputLoc.lon - genLocation.lon) < 0.001)
               );
               if (!inputLocation) {
                 console.warn(`Could not match generated location "${genLocation.locationName}" for theme ${locationSet.theme}.`);
@@ -1367,7 +1363,7 @@ const rateLimit = (req, res, next) => {
    --------------------------------------------------------------------------- */
 router.post("/", rateLimit, async (req, res) => {
   try {
-    const { lat, lon } = req.body;
+    const { lat, lon, user_id } = req.body; // user_id can be supplied from the client if available
     if (!lat || !lon) {
       return res.status(400).json({ error: "Latitude and longitude are required." });
     }
@@ -1393,8 +1389,12 @@ router.post("/", rateLimit, async (req, res) => {
       return res.status(500).json({ error: "Failed to generate experiences." });
     }
 
+    // Use the provided user_id or a fallback value ("system") if not provided.
+    const effectiveUserId = user_id || "system";
+
     const enrichedExperiences = generatedExperiences.map(exp => ({
       ...exp,
+      user_id: effectiveUserId,
       locationKey,
       times_shown: 0,
       created_at: new Date()
