@@ -17,7 +17,7 @@ const experienceSchema = new mongoose.Schema(
     title: { type: String, required: true },
     description: { type: String, required: true },
     locations: { type: [locationSchema], required: true }, // Now supports multiple locations
-    user_id: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true }, // Tracks who requested the experience
+    user_id: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: false }, // Tracks who requested the experience
     // New field to track users who have favorited this experience
     favoritedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
   },

@@ -1361,51 +1361,57 @@ const rateLimit = (req, res, next) => {
 /* ---------------------------------------------------------------------------
    Main API Route: Using Location Name as Key for Caching Experiences
    --------------------------------------------------------------------------- */
-router.post("/", rateLimit, async (req, res) => {
-  try {
-    const { lat, lon, user_id } = req.body; // user_id can be supplied from the client if available
-    if (!lat || !lon) {
-      return res.status(400).json({ error: "Latitude and longitude are required." });
+   router.post("/api/experiences", rateLimit, async (req, res) => {
+    try {
+      const { lat, lon, user_id } = req.body; // user_id can be supplied from the client if available
+      if (!lat || !lon) {
+        return res.status(400).json({ error: "Latitude and longitude are required." });
+      }
+      
+      // Reverse geocode to obtain a stable location name key.
+      const rawLocationName = await getLocationNameFromCoordinates(lat, lon);
+      if (!rawLocationName) {
+        return res.status(500).json({ error: "Failed to determine location name." });
+      }
+      const locationKey = normalizeLocationName(rawLocationName);
+  
+      // Use the provided user_id or a fallback value ("system") if not provided.
+      const effectiveUserId = user_id || "system";
+  
+      // Query for experiences using both locationKey and effectiveUserId
+      const existingExperiences = await Experience.find({ 
+        locationKey,
+        user_id: effectiveUserId
+      });
+      console.log("Found cached experiences:", existingExperiences);
+  
+      if (existingExperiences && existingExperiences.length > 0) {
+        console.log(`Returning cached experiences for ${locationKey}`);
+        return res.json({ experiences: existingExperiences });
+      }
+  
+      // No cached experiences: get nearby places and generate new experiences.
+      const nearbyPlaces = await getNearbyPlaces(lat, lon, 15000);
+      const generatedExperiences = await fetchGeminiExperiences(nearbyPlaces, lat, lon);
+      if (generatedExperiences.length === 0) {
+        return res.status(500).json({ error: "Failed to generate experiences." });
+      }
+  
+      const enrichedExperiences = generatedExperiences.map(exp => ({
+        ...exp,
+        user_id: effectiveUserId,
+        locationKey,
+        times_shown: 0,
+        created_at: new Date()
+      }));
+      const savedExperiences = await Experience.insertMany(enrichedExperiences);
+      console.log(`Saved ${savedExperiences.length} experiences for ${locationKey}`);
+      return res.json({ experiences: savedExperiences });
+    } catch (error) {
+      console.error("Error in /api/experiences:", error);
+      return res.status(500).json({ error: "Internal Server Error" });
     }
-    
-    // Reverse geocode to obtain a stable location name key.
-    const rawLocationName = await getLocationNameFromCoordinates(lat, lon);
-    if (!rawLocationName) {
-      return res.status(500).json({ error: "Failed to determine location name." });
-    }
-    const locationKey = normalizeLocationName(rawLocationName);
-
-    // Check database for experiences already generated for this location.
-    const existingExperiences = await Experience.find({ locationKey });
-    if (existingExperiences && existingExperiences.length > 0) {
-      console.log(`Returning cached experiences for ${locationKey}`);
-      return res.json({ experiences: existingExperiences });
-    }
-
-    // No cached experiences: get nearby places and generate new experiences.
-    const nearbyPlaces = await getNearbyPlaces(lat, lon, 15000);
-    const generatedExperiences = await fetchGeminiExperiences(nearbyPlaces, lat, lon);
-    if (generatedExperiences.length === 0) {
-      return res.status(500).json({ error: "Failed to generate experiences." });
-    }
-
-    // Use the provided user_id or a fallback value ("system") if not provided.
-    const effectiveUserId = user_id || "system";
-
-    const enrichedExperiences = generatedExperiences.map(exp => ({
-      ...exp,
-      user_id: effectiveUserId,
-      locationKey,
-      times_shown: 0,
-      created_at: new Date()
-    }));
-    const savedExperiences = await Experience.insertMany(enrichedExperiences);
-    console.log(`Saved ${savedExperiences.length} experiences for ${locationKey}`);
-    return res.json({ experiences: savedExperiences });
-  } catch (error) {
-    console.error("Error in /api/experiences:", error);
-    return res.status(500).json({ error: "Internal Server Error" });
-  }
-});
+  });
+  
 
 export default router;
