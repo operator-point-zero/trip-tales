@@ -144,43 +144,24 @@ const router = express.Router();
 //     return res.status(500).json({ error: 'Failed to save feedback' });
 //   }
 // });
+
 /**
  * POST /api/feedback/:locationId
  * Add a rating and feedback for a specific location
  */
 router.post('/:locationId', async (req, res) => {
   try {
-    const { locationId } = req.params;
-    const { userId, rating, comment } = req.body;
-
-    // Input validation
-    if (!userId) {
-      return res.status(400).json({ error: 'User ID is required' });
-    }
-
-    if (!rating || rating < 1 || rating > 5) {
-      return res.status(400).json({ error: 'Rating must be a number between 1-5' });
-    }
+    // ... (rest of your code)
 
     // Find the tour location
     const tourLocation = await TourDescription.findOne({ locationId });
 
-    console.log('--- Before null check ---');
-    console.log('locationId from params:', locationId);
-    console.log('tourLocation after findOne:', tourLocation);
+    // ... (logging and null check)
 
-    // Handle the case where the location is not found
-    if (!tourLocation) {
-      console.log('tourLocation is null - returning 404');
-      return res.status(404).json({ error: 'Location not found' });
-    }
-
-    console.log('--- After null check ---');
-    console.log('tourLocation.feedback before push:', tourLocation.feedback);
-
-    // **Crucial Check:**
+    // **Defensive Initialization:**
     if (!tourLocation.feedback) {
-      console.error('ERROR: tourLocation.feedback is UNDEFINED right before the push!');
+      tourLocation.feedback = [];
+      console.warn('WARNING: tourLocation.feedback was undefined, initialized to an empty array.');
     }
 
     // Create new feedback entry
@@ -192,23 +173,12 @@ router.post('/:locationId', async (req, res) => {
     };
 
     // Add feedback to the location's feedback array
-    tourLocation.feedback.push(newFeedback); // Line 191
+    tourLocation.feedback.push(newFeedback); // Line 195
 
-    // Update the average rating
-    tourLocation.updateAverageRating();
-
-    // Save the updated document
-    await tourLocation.save();
-
-    return res.status(201).json({
-      message: 'Feedback submitted successfully',
-      averageRating: tourLocation.averageRating,
-      ratingCount: tourLocation.ratingCount
-    });
+    // ... (rest of your code)
 
   } catch (error) {
-    console.error('Error saving feedback:', error);
-    return res.status(500).json({ error: 'Failed to save feedback' });
+    // ... (error handling)
   }
 });
 
