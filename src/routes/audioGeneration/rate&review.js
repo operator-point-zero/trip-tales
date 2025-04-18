@@ -1,5 +1,5 @@
 import express from 'express';
-import TourDescription from "../../models/audioTour/TourDescription.js";
+import TourDescription from "../../models/audioTour/TourDescription.js"
 const router = express.Router();
 
 /**
@@ -23,64 +23,56 @@ router.post('/:locationId', async (req, res) => {
     // Find the tour location
     const tourLocation = await TourDescription.findOne({ locationId });
 
+    console.log('--- Before null check ---');
+    console.log('locationId from params:', locationId);
+    console.log('tourLocation after findOne:', tourLocation);
+
     // Handle the case where the location is not found
     if (!tourLocation) {
+      console.log('tourLocation is null - returning 404');
       return res.status(404).json({ error: 'Location not found' });
     }
 
-    // Defensive Initialization
+    console.log('--- After null check ---');
+    console.log('tourLocation.feedback before push:', tourLocation.feedback);
+
+    // Defensive Initialization:
     if (!tourLocation.feedback) {
       tourLocation.feedback = [];
       console.warn('WARNING: tourLocation.feedback was undefined, initialized to an empty array.');
     }
 
-    // Check if user has already submitted feedback for this location
-    const existingFeedbackIndex = tourLocation.feedback.findIndex(
-      item => item.userId === userId
-    );
+    // Create new feedback entry
+    const newFeedback = {
+      userId,
+      rating,
+      comment: comment || '',
+      timestamp: new Date()
+    };
 
-    if (existingFeedbackIndex !== -1) {
-      // Update existing feedback
-      tourLocation.feedback[existingFeedbackIndex] = {
-        userId,
-        rating,
-        comment: comment || '',
-        timestamp: new Date()
-      };
-    } else {
-      // Create new feedback entry
-      const newFeedback = {
-        userId,
-        rating,
-        comment: comment || '',
-        timestamp: new Date()
-      };
+    // Add feedback to the location's feedback array
+    tourLocation.feedback.push(newFeedback);
 
-      // Add feedback to the location's feedback array
-      tourLocation.feedback.push(newFeedback);
-    }
+    // Update the average rating
+    tourLocation.updateAverageRating();
 
-    // Calculate average rating manually since updateAverageRating is not available
-    if (tourLocation.feedback.length === 0) {
-      tourLocation.averageRating = 0;
-      tourLocation.ratingCount = 0;
-    } else {
-      const totalRating = tourLocation.feedback.reduce((sum, item) => sum + item.rating, 0);
-      tourLocation.averageRating = totalRating / tourLocation.feedback.length;
-      tourLocation.ratingCount = tourLocation.feedback.length;
-    }
-
-    // Save the updated document
-    await tourLocation.save();
-
-    return res.status(201).json({
-      message: 'Feedback submitted successfully',
-      averageRating: tourLocation.averageRating,
-      ratingCount: tourLocation.ratingCount
-    });
+    // Save the updated document with logging
+    tourLocation.save()
+      .then((savedDocument) => {
+        console.log('Feedback saved successfully:', savedDocument);
+        return res.status(201).json({
+          message: 'Feedback submitted successfully',
+          averageRating: savedDocument.averageRating,
+          ratingCount: savedDocument.ratingCount
+        });
+      })
+      .catch((saveError) => {
+        console.error('Error during save operation:', saveError);
+        return res.status(500).json({ error: 'Failed to save feedback' });
+      });
 
   } catch (error) {
-    console.error('Error saving feedback:', error);
+    console.error('Error in route handler:', error);
     return res.status(500).json({ error: 'Failed to save feedback' });
   }
 });
@@ -101,41 +93,14 @@ router.get('/:locationId', async (req, res) => {
 
     return res.status(200).json({
       locationName: tourLocation.locationName,
-      averageRating: tourLocation.averageRating || 0,
-      ratingCount: tourLocation.ratingCount || 0,
-      feedback: tourLocation.feedback || []
+      averageRating: tourLocation.averageRating,
+      ratingCount: tourLocation.ratingCount,
+      feedback: tourLocation.feedback
     });
 
   } catch (error) {
     console.error('Error retrieving feedback:', error);
     return res.status(500).json({ error: 'Failed to retrieve feedback' });
-  }
-});
-
-/**
- * GET /api/feedback/:locationId/check/:userId
- * Check if a user has already rated a location
- */
-router.get('/:locationId/check/:userId', async (req, res) => {
-  try {
-    const { locationId, userId } = req.params;
-    
-    const tourLocation = await TourDescription.findOne({ locationId });
-    
-    if (!tourLocation) {
-      return res.status(404).json({ error: 'Location not found' });
-    }
-    
-    // Check if feedback array exists and if user has already given feedback
-    const hasRated = tourLocation.feedback && 
-      tourLocation.feedback.some(item => item.userId === userId);
-    
-    return res.status(200).json({
-      hasRated: !!hasRated
-    });
-  } catch (error) {
-    console.error('Error checking user rating:', error);
-    return res.status(500).json({ error: 'Failed to check rating status' });
   }
 });
 
