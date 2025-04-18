@@ -35,7 +35,7 @@ app.use("/api/narration", narrationRoutes);
 app.use("/api/payments", successfulTransactionsRoutes);
 app.use("/api/user", purchasedToursRoutes);
 app.use('/api', favoritesRoutes);
-app.use('/api', reviewRoutes);
+app.use('/api/rating', reviewRoutes);
 
 
 

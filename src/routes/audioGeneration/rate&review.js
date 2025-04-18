@@ -7,7 +7,7 @@ const router = express.Router();
  * POST /api/feedback/:locationId
  * Add a rating and feedback for a specific location
  */
-router.post('/rating/:locationId', async (req, res) => {
+router.post('/:locationId', async (req, res) => {
   try {
     const { locationId } = req.params;
     const { userId, rating, comment } = req.body;
@@ -61,7 +61,7 @@ router.post('/rating/:locationId', async (req, res) => {
  * GET /api/feedback/:locationId
  * Get all feedback for a specific location
  */
-router.get('/rating/:locationId', async (req, res) => {
+router.get('/:locationId', async (req, res) => {
   try {
     const { locationId } = req.params;
     
