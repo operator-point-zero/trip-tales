@@ -144,7 +144,6 @@ const router = express.Router();
 //     return res.status(500).json({ error: 'Failed to save feedback' });
 //   }
 // });
-
 /**
  * POST /api/feedback/:locationId
  * Add a rating and feedback for a specific location
@@ -179,6 +178,11 @@ router.post('/:locationId', async (req, res) => {
     console.log('--- After null check ---');
     console.log('tourLocation.feedback before push:', tourLocation.feedback);
 
+    // **Crucial Check:**
+    if (!tourLocation.feedback) {
+      console.error('ERROR: tourLocation.feedback is UNDEFINED right before the push!');
+    }
+
     // Create new feedback entry
     const newFeedback = {
       userId,
@@ -188,7 +192,7 @@ router.post('/:locationId', async (req, res) => {
     };
 
     // Add feedback to the location's feedback array
-    tourLocation.feedback.push(newFeedback); // Line 188
+    tourLocation.feedback.push(newFeedback); // Line 191
 
     // Update the average rating
     tourLocation.updateAverageRating();
