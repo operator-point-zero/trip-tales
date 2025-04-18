@@ -11,6 +11,8 @@ import narrationRoutes from "./routes/audioGeneration/generateAudio.js";
 import successfulTransactionsRoutes from "./routes/payments/succesfull_transactions.js";
 import purchasedToursRoutes from "./routes/auth/usersPurchasedTours.js"; 
 import favoritesRoutes from "./routes/TourGeneration/likeExperience.js";
+import reviewRoutes from "./routes/audioGeneration/rate&review.js";
+
 
 
 
@@ -33,6 +35,7 @@ app.use("/api/narration", narrationRoutes);
 app.use("/api/payments", successfulTransactionsRoutes);
 app.use("/api/user", purchasedToursRoutes);
 app.use('/api', favoritesRoutes);
+app.use('/api', reviewRoutes);
 
 
 
