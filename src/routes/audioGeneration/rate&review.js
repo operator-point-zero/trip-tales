@@ -1,5 +1,5 @@
 import express from 'express';
-import TourDescription from "../../models/audioTour/TourDescription.js"
+import TourDescription from "../../models/audioTour/TourDescription.js";
 const router = express.Router();
 
 /**
@@ -60,8 +60,15 @@ router.post('/:locationId', async (req, res) => {
       tourLocation.feedback.push(newFeedback);
     }
 
-    // Update the average rating
-    tourLocation.updateAverageRating();
+    // Calculate average rating manually since updateAverageRating is not available
+    if (tourLocation.feedback.length === 0) {
+      tourLocation.averageRating = 0;
+      tourLocation.ratingCount = 0;
+    } else {
+      const totalRating = tourLocation.feedback.reduce((sum, item) => sum + item.rating, 0);
+      tourLocation.averageRating = totalRating / tourLocation.feedback.length;
+      tourLocation.ratingCount = tourLocation.feedback.length;
+    }
 
     // Save the updated document
     await tourLocation.save();
@@ -94,8 +101,8 @@ router.get('/:locationId', async (req, res) => {
 
     return res.status(200).json({
       locationName: tourLocation.locationName,
-      averageRating: tourLocation.averageRating,
-      ratingCount: tourLocation.ratingCount,
+      averageRating: tourLocation.averageRating || 0,
+      ratingCount: tourLocation.ratingCount || 0,
       feedback: tourLocation.feedback || []
     });
 
