@@ -40,12 +40,9 @@ const TourDescriptionSchema = new mongoose.Schema({
   lat: { type: Number, required: true },
   lng: { type: Number, required: true },
   narration: { type: String, required: true },
-  audioUrls: { type: Object, default: {} }, // Object to store audio URLs
-  // Add average rating field that will be updated when new ratings come in
+  audioUrls: { type: Object, default: {} },
   averageRating: { type: Number, default: 0 },
-  // Total number of ratings received
   ratingCount: { type: Number, default: 0 },
-  // Array of feedback objects
   feedback: [FeedbackSchema]
 });
 
@@ -61,4 +58,12 @@ TourDescriptionSchema.methods.updateAverageRating = function() {
   }
 };
 
-export default mongoose.model('TourDescription', TourDescriptionSchema);
+// Check if the model already exists before creating it
+let TourDescription;
+try {
+  TourDescription = mongoose.model('TourDescription');
+} catch (error) {
+  TourDescription = mongoose.model('TourDescription', TourDescriptionSchema);
+}
+
+export default TourDescription;
