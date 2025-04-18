@@ -166,15 +166,18 @@ router.post('/:locationId', async (req, res) => {
     // Find the tour location
     const tourLocation = await TourDescription.findOne({ locationId });
 
-    console.log('tourLocation:', tourLocation); // Added logging
-    if (tourLocation) {
-      console.log('tourLocation.feedback:', tourLocation.feedback); // Added logging
-    }
+    console.log('--- Before null check ---');
+    console.log('locationId from params:', locationId);
+    console.log('tourLocation after findOne:', tourLocation);
 
     // Handle the case where the location is not found
     if (!tourLocation) {
+      console.log('tourLocation is null - returning 404');
       return res.status(404).json({ error: 'Location not found' });
     }
+
+    console.log('--- After null check ---');
+    console.log('tourLocation.feedback before push:', tourLocation.feedback);
 
     // Create new feedback entry
     const newFeedback = {
@@ -185,7 +188,7 @@ router.post('/:locationId', async (req, res) => {
     };
 
     // Add feedback to the location's feedback array
-    tourLocation.feedback.push(newFeedback); // Line 128
+    tourLocation.feedback.push(newFeedback); // Line 188
 
     // Update the average rating
     tourLocation.updateAverageRating();
