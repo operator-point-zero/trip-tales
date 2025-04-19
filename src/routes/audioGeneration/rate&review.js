@@ -1,5 +1,5 @@
 import express from "express";
-import Rating from "../../models/audioTour/rating";
+import Rating from "../../models/audioTour/rating.js";
 
 
 const router = express.Router();
