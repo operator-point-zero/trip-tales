@@ -4,8 +4,8 @@ const bodyParser = require('body-parser');
 require('dotenv').config(); // Load environment variables from .env
 
 // Import the Experience model
-// // Adjust the path if needed
-import Experience from "../../models/experiences/Experience.js";
+const Experience = require("../../models/experiences/Experience");
+const purchases = require("./routes/auth/purchases.js"); // Use require here
 
 // 1. Define your Mongoose schema (if you haven't already)
 const UserSchema = new mongoose.Schema({
@@ -27,7 +27,12 @@ const UserSchema = new mongoose.Schema({
 // 2. Define your Mongoose model
 const User = mongoose.model("User", UserSchema);
 
-
+// 3. Connect to MongoDB
+mongoose.connect(process.env.MONGO_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+}).then(() => console.log('MongoDB connected'))
+  .catch(err => console.error('MongoDB connection error:', err));
 
 // 4. Set up Express app
 const app = express();
@@ -39,7 +44,7 @@ app.post('/record-purchase', async (req, res) => {
 
     try {
         // 5.1. Find the user
-        const user = await User.findOne({ _id: userId });
+        const user = await User.findById(userId); // Use findById for ObjectId
         if (!user) {
             return res.status(400).json({ error: 'User not found' });
         }
