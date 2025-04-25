@@ -91,3 +91,5 @@ app.post('/record-purchase', async (req, res) => {
 // 6. Start the server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+export default router;
