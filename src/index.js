@@ -12,6 +12,8 @@ import successfulTransactionsRoutes from "./routes/payments/succesfull_transacti
 import purchasedToursRoutes from "./routes/auth/usersPurchasedTours.js"; 
 import favoritesRoutes from "./routes/TourGeneration/likeExperience.js";
 import reviewRoutes from "./routes/audioGeneration/rate&review.js";
+import purchases from "./routes/auth/purchases.js";
+
 
 
 
@@ -36,6 +38,8 @@ app.use("/api/payments", successfulTransactionsRoutes);
 app.use("/api/user", purchasedToursRoutes);
 app.use('/api', favoritesRoutes);
 app.use('/api/rating', reviewRoutes);
+app.use('/api/purchases', purchases);
+
 
 
 
