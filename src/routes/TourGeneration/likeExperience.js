@@ -191,5 +191,83 @@ router.get('/favorites/:userId', async (req, res) => {
   }
 });
 
+router.get('/purchasedTours/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    if (!userId) {
+      return res.status(400).json({ message: 'userId is required' });
+    }
+
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const extractExperiences = async (ids) => {
+      if (!ids || ids.length === 0) return [];
+
+      const experiences = await Experience.find({ _id: { $in: ids } }).populate({
+        path: 'user_id',
+        model: 'User',
+        select: 'name profPicUrl'
+      });
+
+      const validExperiences = experiences.filter(exp => exp != null);
+
+      return validExperiences.map(exp => {
+        let photos = [];
+        let locationCount = 0;
+
+        if (Array.isArray(exp.locations)) {
+          locationCount = exp.locations.length;
+
+          exp.locations.forEach((location, index) => {
+            if (location && typeof location === 'object') {
+              if (Array.isArray(location.photos) && location.photos.length > 0) {
+                photos = photos.concat(location.photos);
+              }
+            } else {
+              console.warn(`Experience ${exp._id}: Invalid location at index ${index}:`, JSON.stringify(location));
+            }
+          });
+        }
+
+        return {
+          _id: exp._id,
+          title: exp.title,
+          description: exp.description,
+          locations: exp.locations,
+          photos,
+          locationCount,
+          creator: exp.user_id ? {
+            name: exp.user_id.name,
+            profPic: exp.user_id.profPicUrl
+          } : null,
+          duration: '2h',
+          distance: '2.5',
+          price: 'Free',
+          type: 'Tour',
+          createdAt: exp.createdAt,
+          updatedAt: exp.updatedAt
+        };
+      });
+    };
+
+    const [favorites, purchasedTours] = await Promise.all([
+      extractExperiences(user.favorites),
+      extractExperiences(user.purchasedTours)
+    ]);
+
+    return res.status(200).json({ favorites, purchasedTours });
+
+  } catch (error) {
+    console.error(`Error fetching user experiences for ${req.params.userId}:`, error);
+    return res.status(500).json({ message: 'Server error while fetching user experiences.' });
+  }
+});
+
+
 
 export default router;
