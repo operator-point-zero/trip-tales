@@ -475,7 +475,7 @@ router.post("/", rateLimit, async (req, res) => {
     }
 
     // No cached experiences for this location: get nearby places and generate new experiences.
-    const nearbyPlaces = await getNearbyPlaces(lat, lon, 30000);
+    const nearbyPlaces = await getNearbyPlaces(lat, lon, 60000);
     const generatedExperiences = await fetchGeminiExperiences(nearbyPlaces, lat, lon);
     if (generatedExperiences.length === 0) {
       return res.status(500).json({ error: "Failed to generate experiences." });
