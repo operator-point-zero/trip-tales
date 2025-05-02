@@ -30,10 +30,18 @@ const getLocationNameFromCoordinates = async (lat, lon) => {
 };
 
 // Normalize the location name to be used as a key in the DB, including a geohash.
+// const normalizeLocationName = (name, lat, lon) => {
+//   const baseKey = name.toLowerCase().replace(/\s+/g, "_").trim();
+//   // Geohash precision of 6 gives a cell size of approximately 1.2km x 0.6km
+//   const geoHash = geohash.encode(lat, lon, 6);
+//   return `${baseKey}_${geoHash}`;
+// };
+
 const normalizeLocationName = (name, lat, lon) => {
   const baseKey = name.toLowerCase().replace(/\s+/g, "_").trim();
-  // Geohash precision of 6 gives a cell size of approximately 1.2km x 0.6km
-  const geoHash = geohash.encode(lat, lon, 6);
+  // Reduced geohash precision from 6 to 5, creating larger geographic cells
+  // Precision 5 = ~4.89km x 4.89km cells instead of 1.2km x 0.6km
+  const geoHash = geohash.encode(lat, lon, 5);
   return `${baseKey}_${geoHash}`;
 };
 
@@ -60,6 +68,35 @@ const placesCache = {
   },
 };
 
+// const getNearbyPlaces = async (lat, lon, radius = 15000) => {
+//   const type = "attractions";
+//   try {
+//     const cachedData = placesCache.get(type, lat, lon, radius);
+//     if (cachedData) {
+//       console.log(`Cache hit for nearby places: ${lat.toFixed(4)},${lon.toFixed(4)},${radius}`);
+//       return cachedData;
+//     }
+//     console.log(`Cache miss for nearby places: ${lat.toFixed(4)},${lon.toFixed(4)},${radius}. Fetching from API...`);
+//     const response = await axios.get(
+//       `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lon}&radius=${radius}&type=tourist_attraction&key=${process.env.GOOGLE_PLACES_API_KEY}`
+//     );
+//     const places = response.data.results.map((place) => ({
+//       locationName: place.name,
+//       lat: place.geometry.location.lat,
+//       lon: place.geometry.location.lng,
+//       placeId: place.place_id,
+//       types: place.types,
+//       rating: place.rating || "N/A",
+//       vicinity: place.vicinity || null,
+//     }));
+//     placesCache.set(type, lat, lon, radius, places);
+//     return places;
+//   } catch (error) {
+//     console.error("Failed to fetch nearby places:", error.message);
+//     return [];
+//   }
+// };
+
 const getNearbyPlaces = async (lat, lon, radius = 15000) => {
   const type = "attractions";
   try {
@@ -68,19 +105,78 @@ const getNearbyPlaces = async (lat, lon, radius = 15000) => {
       console.log(`Cache hit for nearby places: ${lat.toFixed(4)},${lon.toFixed(4)},${radius}`);
       return cachedData;
     }
+    
     console.log(`Cache miss for nearby places: ${lat.toFixed(4)},${lon.toFixed(4)},${radius}. Fetching from API...`);
-    const response = await axios.get(
+    
+    // First attempt: Get tourist attractions (primary target)
+    const touristResponse = await axios.get(
       `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lon}&radius=${radius}&type=tourist_attraction&key=${process.env.GOOGLE_PLACES_API_KEY}`
     );
-    const places = response.data.results.map((place) => ({
-      locationName: place.name,
-      lat: place.geometry.location.lat,
-      lon: place.geometry.location.lng,
-      placeId: place.place_id,
-      types: place.types,
-      rating: place.rating || "N/A",
-      vicinity: place.vicinity || null,
-    }));
+    
+    let places = processPlacesResponse(touristResponse);
+    console.log(`Found ${places.length} tourist attractions`);
+    
+    // If we have few results, expand our search with additional place types
+    if (places.length < 10) {
+      console.log("Found fewer than 10 tourist attractions, expanding search to include landmarks and museums...");
+      
+      // Second attempt: Add landmarks
+      const landmarkResponse = await axios.get(
+        `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lon}&radius=${radius}&type=landmark&key=${process.env.GOOGLE_PLACES_API_KEY}`
+      );
+      const landmarkPlaces = processPlacesResponse(landmarkResponse);
+      
+      // Third attempt: Add museums
+      const museumResponse = await axios.get(
+        `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lon}&radius=${radius}&type=museum&key=${process.env.GOOGLE_PLACES_API_KEY}`
+      );
+      const museumPlaces = processPlacesResponse(museumResponse);
+      
+      // Fourth attempt: Add parks
+      const parkResponse = await axios.get(
+        `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lon}&radius=${radius}&type=park&key=${process.env.GOOGLE_PLACES_API_KEY}`
+      );
+      const parkPlaces = processPlacesResponse(parkResponse);
+      
+      // Add them all to our places array, removing duplicates by place_id
+      const allPlaces = [...places, ...landmarkPlaces, ...museumPlaces, ...parkPlaces];
+      places = Array.from(new Map(allPlaces.map(place => [place.placeId, place])).values());
+      console.log(`Expanded search found ${places.length} total attractions`);
+    }
+    
+    // If we still have few results, try expanding the radius
+    if (places.length < 8 && radius < 25000) {
+      console.log(`Still fewer than 8 places, expanding radius to 25km...`);
+      const expandedPlaces = await getNearbyPlaces(lat, lon, 25000);
+      
+      // Only use expanded results if they actually found more places
+      if (expandedPlaces.length > places.length) {
+        places = expandedPlaces;
+      }
+    }
+    
+    // As a last resort, try a text search for the city name + "attractions"
+    if (places.length < 5) {
+      try {
+        const locationName = await getLocationNameFromCoordinates(lat, lon);
+        if (locationName) {
+          console.log(`Last resort: Using text search for "${locationName} attractions"...`);
+          const textSearchResponse = await axios.get(
+            `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(locationName + " attractions")}&location=${lat},${lon}&radius=${radius}&key=${process.env.GOOGLE_PLACES_API_KEY}`
+          );
+          const textSearchPlaces = processPlacesResponse(textSearchResponse);
+          
+          // Merge with existing places, removing duplicates
+          const allPlaces = [...places, ...textSearchPlaces];
+          places = Array.from(new Map(allPlaces.map(place => [place.placeId, place])).values());
+          console.log(`Text search found ${places.length} total attractions`);
+        }
+      } catch (error) {
+        console.error("Error in text search fallback:", error.message);
+      }
+    }
+    
+    // Cache and return the results
     placesCache.set(type, lat, lon, radius, places);
     return places;
   } catch (error) {
@@ -110,6 +206,48 @@ const getLocationPhotos = async (placeId) => {
 /* ---------------------------------------------------------------------------
    Experience Generation Helpers (Categorization, Selection, Generation)
    --------------------------------------------------------------------------- */
+// const categorizeAttractions = (attractions) => {
+//   const categories = {
+//     museums: [],
+//     historical: [],
+//     nature: [],
+//     entertainment: [],
+//     religious: [],
+//     arts: [],
+//     shopping: [],
+//     neighborhoods: [],
+//     landmarks: [],
+//     other: []
+//   };
+
+//   attractions.forEach(place => {
+//     const types = place.types || [];
+//     let categorized = false;
+//     if (types.includes("museum")) { categories.museums.push(place); categorized = true; }
+//     if (types.includes("park") || types.includes("natural_feature")) { categories.nature.push(place); categorized = true; }
+//     if (types.includes("church") || types.includes("mosque") || types.includes("temple") ||
+//         types.includes("hindu_temple") || types.includes("synagogue") || types.includes("place_of_worship")) { categories.religious.push(place); categorized = true; }
+//     if (types.includes("art_gallery") || types.includes("performing_arts_theater")) { categories.arts.push(place); categorized = true; }
+//     if (types.includes("amusement_park") || types.includes("zoo") || types.includes("aquarium")) { categories.entertainment.push(place); categorized = true; }
+//     if (types.includes("department_store") || types.includes("shopping_mall")) { categories.shopping.push(place); categorized = true; }
+//     if (types.some(type => type.includes("historic") || type.includes("monument") || type.includes("castle"))) { categories.historical.push(place); categorized = true; }
+//     if (types.includes("neighborhood") || types.includes("sublocality")) { categories.neighborhoods.push(place); categorized = true; }
+//     if (types.includes("landmark") || types.includes("point_of_interest")) { categories.landmarks.push(place); categorized = true; }
+//     if (!categorized) { categories.other.push(place); }
+//   });
+
+//   // De-duplicate across categories
+//   const seenPlaceIds = new Set();
+//   for (const category in categories) {
+//     categories[category] = categories[category].filter(place => {
+//       if (seenPlaceIds.has(place.placeId)) return false;
+//       seenPlaceIds.add(place.placeId);
+//       return true;
+//     });
+//   }
+//   return categories;
+// };
+
 const categorizeAttractions = (attractions) => {
   const categories = {
     museums: [],
@@ -121,35 +259,109 @@ const categorizeAttractions = (attractions) => {
     shopping: [],
     neighborhoods: [],
     landmarks: [],
+    parks: [],
+    viewpoints: [],
+    monuments: [],
+    modern_architecture: [],
+    markets: [],
+    cafes: [],
+    restaurants: [],
     other: []
   };
 
   attractions.forEach(place => {
     const types = place.types || [];
+    const name = place.locationName.toLowerCase();
     let categorized = false;
+    
+    // Check name-based categorization first
+    if (name.includes('museum') || name.includes('gallery')) { 
+      categories.museums.push(place); categorized = true; 
+    }
+    if (name.includes('monument') || name.includes('memorial')) { 
+      categories.monuments.push(place); categorized = true; 
+    }
+    if (name.includes('castle') || name.includes('palace') || name.includes('ruins')) { 
+      categories.historical.push(place); categorized = true; 
+    }
+    if (name.includes('viewpoint') || name.includes('observation') || name.includes('view')) { 
+      categories.viewpoints.push(place); categorized = true; 
+    }
+    if (name.includes('market') || name.includes('bazaar')) { 
+      categories.markets.push(place); categorized = true; 
+    }
+    
+    // Type-based categorization
     if (types.includes("museum")) { categories.museums.push(place); categorized = true; }
-    if (types.includes("park") || types.includes("natural_feature")) { categories.nature.push(place); categorized = true; }
+    if (types.includes("park")) { categories.parks.push(place); categorized = true; }
+    if (types.includes("natural_feature")) { categories.nature.push(place); categorized = true; }
     if (types.includes("church") || types.includes("mosque") || types.includes("temple") ||
-        types.includes("hindu_temple") || types.includes("synagogue") || types.includes("place_of_worship")) { categories.religious.push(place); categorized = true; }
-    if (types.includes("art_gallery") || types.includes("performing_arts_theater")) { categories.arts.push(place); categorized = true; }
-    if (types.includes("amusement_park") || types.includes("zoo") || types.includes("aquarium")) { categories.entertainment.push(place); categorized = true; }
-    if (types.includes("department_store") || types.includes("shopping_mall")) { categories.shopping.push(place); categorized = true; }
-    if (types.some(type => type.includes("historic") || type.includes("monument") || type.includes("castle"))) { categories.historical.push(place); categorized = true; }
-    if (types.includes("neighborhood") || types.includes("sublocality")) { categories.neighborhoods.push(place); categorized = true; }
-    if (types.includes("landmark") || types.includes("point_of_interest")) { categories.landmarks.push(place); categorized = true; }
-    if (!categorized) { categories.other.push(place); }
+        types.includes("hindu_temple") || types.includes("synagogue") || types.includes("place_of_worship")) { 
+      categories.religious.push(place); categorized = true; 
+    }
+    if (types.includes("art_gallery") || types.includes("performing_arts_theater")) { 
+      categories.arts.push(place); categorized = true; 
+    }
+    if (types.includes("amusement_park") || types.includes("zoo") || types.includes("aquarium")) { 
+      categories.entertainment.push(place); categorized = true; 
+    }
+    if (types.includes("department_store") || types.includes("shopping_mall")) { 
+      categories.shopping.push(place); categorized = true; 
+    }
+    if (types.some(type => type.includes("historic") || type.includes("monument") || type.includes("castle"))) { 
+      categories.historical.push(place); categorized = true; 
+    }
+    if (types.includes("neighborhood") || types.includes("sublocality")) { 
+      categories.neighborhoods.push(place); categorized = true; 
+    }
+    if (types.includes("landmark") || types.includes("point_of_interest")) { 
+      categories.landmarks.push(place); categorized = true; 
+    }
+    if (types.includes("cafe")) { categories.cafes.push(place); categorized = true; }
+    if (types.includes("restaurant")) { categories.restaurants.push(place); categorized = true; }
+    if (types.includes("modern_architecture") || name.includes("tower") || name.includes("skyscraper")) { 
+      categories.modern_architecture.push(place); categorized = true; 
+    }
+    
+    // If not categorized yet, check additional patterns in name
+    if (!categorized) {
+      if (name.includes('park') || name.includes('garden')) { 
+        categories.parks.push(place); categorized = true; 
+      }
+      else if (name.includes('church') || name.includes('temple') || name.includes('mosque') || 
+               name.includes('cathedral') || name.includes('chapel')) { 
+        categories.religious.push(place); categorized = true; 
+      }
+      else if (name.includes('theater') || name.includes('theatre') || name.includes('cinema')) { 
+        categories.arts.push(place); categorized = true; 
+      }
+      else if (name.includes('historic') || name.includes('ancient') || 
+               name.includes('old') || name.includes('heritage')) { 
+        categories.historical.push(place); categorized = true; 
+      }
+      else { 
+        categories.other.push(place); 
+      }
+    }
   });
 
-  // De-duplicate across categories
+  // De-duplicate across categories but prioritize keeping items in more specific categories
   const seenPlaceIds = new Set();
-  for (const category in categories) {
-    categories[category] = categories[category].filter(place => {
+  const priorityOrder = ['monuments', 'historical', 'museums', 'viewpoints', 'arts', 'religious', 
+                         'parks', 'nature', 'entertainment', 'landmarks', 'neighborhoods', 
+                         'modern_architecture', 'markets', 'shopping', 'cafes', 'restaurants', 'other'];
+  
+  // Process categories in priority order
+  const finalCategories = {...categories};
+  for (const category of priorityOrder) {
+    finalCategories[category] = categories[category].filter(place => {
       if (seenPlaceIds.has(place.placeId)) return false;
       seenPlaceIds.add(place.placeId);
       return true;
     });
   }
-  return categories;
+  
+  return finalCategories;
 };
 
 const getWeightedRandomSelection = (items, count, weights = null) => {
@@ -187,6 +399,67 @@ const getWeightedRandomSelection = (items, count, weights = null) => {
   return selected;
 };
 
+// const generateDiverseLocationSets = (attractions, userLat, userLon, numSets = 10, locationsPerSet = 4) => {
+//   if (!attractions || attractions.length === 0) return [];
+//   const categorized = categorizeAttractions(attractions);
+
+//   // Compute squared distances from user for weighting
+//   attractions.forEach(place => {
+//     const epsilon = 0.0001;
+//     place.distanceSq = Math.pow(place.lat - userLat, 2) + Math.pow(place.lon - userLon, 2) + epsilon;
+//   });
+
+//   const themeSets = [
+//     ["Historical Highlights", ["historical", "landmarks", "museums"], 2],
+//     ["Arts & Culture", ["arts", "museums", "historical", "landmarks"], 2],
+//     ["Nature Escape", ["nature", "landmarks", "parks"], 2],
+//     ["Religious & Spiritual Sites", ["religious", "historical", "landmarks"], 2],
+//     ["Family Fun", ["entertainment", "nature", "landmarks", "zoo", "aquarium"], 2],
+//     ["Local Vibe & Shopping", ["neighborhoods", "shopping", "landmarks", "cafes"], 2],
+//     ["Hidden Gems & Local Spots", ["other", "landmarks", "neighborhoods", "restaurants"], 2],
+//     ["Architectural Wonders", ["historical", "religious", "landmarks", "modern_architecture"], 2],
+//     ["Scenic Views & Photo Ops", ["nature", "landmarks", "historical", "viewpoints"], 2],
+//     ["Cultural Immersion", ["museums", "arts", "neighborhoods", "markets"], 2]
+//   ];
+
+//   const locationSets = [];
+//   const usedPlaceIdsInSession = new Set();
+//   for (let i = 0; i < numSets && i < themeSets.length; i++) {
+//     const [theme, categoriesToUse] = themeSets[i];
+//     let availableForTheme = [];
+//     categoriesToUse.forEach(category => {
+//       if (categorized[category] && categorized[category].length > 0) {
+//         const uniquePlacesInCategory = categorized[category].filter(p => !usedPlaceIdsInSession.has(p.placeId));
+//         availableForTheme = availableForTheme.concat(uniquePlacesInCategory);
+//       }
+//     });
+//     // Remove duplicates
+//     availableForTheme = Array.from(new Map(availableForTheme.map(item => [item.placeId, item])).values());
+//     if (availableForTheme.length < 2) continue;
+//     const weights = availableForTheme.map(place => 1 / place.distanceSq);
+//     const selectedLocations = getWeightedRandomSelection(availableForTheme, locationsPerSet, weights);
+//     if (selectedLocations.length >= 2) {
+//       locationSets.push({ theme, locations: selectedLocations });
+//       selectedLocations.forEach(loc => usedPlaceIdsInSession.add(loc.placeId));
+//     }
+//   }
+//   // Fallback if not enough sets
+//   if(locationSets.length < Math.min(numSets, 5) && attractions.length >= locationsPerSet) {
+//     console.log("Generating additional 'Best Of' sets due to low theme-specific results.");
+//     const allAvailable = attractions.filter(p => !usedPlaceIdsInSession.has(p.placeId));
+//     if(allAvailable.length >= 2) {
+//       const weights = allAvailable.map(place => 1 / place.distanceSq);
+//       const bestOfLocations = getWeightedRandomSelection(allAvailable, locationsPerSet, weights);
+//       if(bestOfLocations.length >= 2) {
+//         locationSets.push({ theme: "Best Of The Area", locations: bestOfLocations });
+//         bestOfLocations.forEach(loc => usedPlaceIdsInSession.add(loc.placeId));
+//       }
+//     }
+//   }
+//   console.log(`Generated ${locationSets.length} diverse location sets.`);
+//   return locationSets;
+// };
+
 const generateDiverseLocationSets = (attractions, userLat, userLon, numSets = 10, locationsPerSet = 4) => {
   if (!attractions || attractions.length === 0) return [];
   const categorized = categorizeAttractions(attractions);
@@ -197,21 +470,29 @@ const generateDiverseLocationSets = (attractions, userLat, userLon, numSets = 10
     place.distanceSq = Math.pow(place.lat - userLat, 2) + Math.pow(place.lon - userLon, 2) + epsilon;
   });
 
+  // Enhanced theme sets with more options
   const themeSets = [
-    ["Historical Highlights", ["historical", "landmarks", "museums"], 2],
+    ["Historical Highlights", ["historical", "landmarks", "museums", "monuments"], 2],
     ["Arts & Culture", ["arts", "museums", "historical", "landmarks"], 2],
-    ["Nature Escape", ["nature", "landmarks", "parks"], 2],
+    ["Nature Escape", ["nature", "parks", "landmarks"], 2],
     ["Religious & Spiritual Sites", ["religious", "historical", "landmarks"], 2],
-    ["Family Fun", ["entertainment", "nature", "landmarks", "zoo", "aquarium"], 2],
-    ["Local Vibe & Shopping", ["neighborhoods", "shopping", "landmarks", "cafes"], 2],
-    ["Hidden Gems & Local Spots", ["other", "landmarks", "neighborhoods", "restaurants"], 2],
+    ["Family Fun", ["entertainment", "parks", "nature", "landmarks"], 2],
+    ["Local Vibes", ["neighborhoods", "markets", "landmarks", "cafes"], 2],
+    ["Hidden Gems", ["other", "landmarks", "neighborhoods"], 2],
     ["Architectural Wonders", ["historical", "religious", "landmarks", "modern_architecture"], 2],
-    ["Scenic Views & Photo Ops", ["nature", "landmarks", "historical", "viewpoints"], 2],
-    ["Cultural Immersion", ["museums", "arts", "neighborhoods", "markets"], 2]
+    ["Scenic Views", ["viewpoints", "nature", "landmarks", "parks"], 2],
+    ["Cultural Immersion", ["museums", "arts", "neighborhoods", "markets"], 2],
+    ["Historical Heritage", ["monuments", "historical", "landmarks"], 2],
+    ["Modern Marvels", ["modern_architecture", "landmarks", "entertainment"], 2],
+    ["Natural Wonders", ["nature", "parks", "viewpoints"], 2],
+    ["Food & Market Tour", ["markets", "cafes", "restaurants", "neighborhoods"], 2],
+    ["Photography Spots", ["viewpoints", "landmarks", "monuments", "modern_architecture"], 2]
   ];
 
   const locationSets = [];
   const usedPlaceIdsInSession = new Set();
+  
+  // First pass: Try to generate themed sets
   for (let i = 0; i < numSets && i < themeSets.length; i++) {
     const [theme, categoriesToUse] = themeSets[i];
     let availableForTheme = [];
@@ -221,29 +502,61 @@ const generateDiverseLocationSets = (attractions, userLat, userLon, numSets = 10
         availableForTheme = availableForTheme.concat(uniquePlacesInCategory);
       }
     });
+    
     // Remove duplicates
     availableForTheme = Array.from(new Map(availableForTheme.map(item => [item.placeId, item])).values());
+    
     if (availableForTheme.length < 2) continue;
+    
+    // Use inverse distance weighting to prefer closer attractions
     const weights = availableForTheme.map(place => 1 / place.distanceSq);
     const selectedLocations = getWeightedRandomSelection(availableForTheme, locationsPerSet, weights);
+    
     if (selectedLocations.length >= 2) {
       locationSets.push({ theme, locations: selectedLocations });
       selectedLocations.forEach(loc => usedPlaceIdsInSession.add(loc.placeId));
     }
   }
-  // Fallback if not enough sets
-  if(locationSets.length < Math.min(numSets, 5) && attractions.length >= locationsPerSet) {
-    console.log("Generating additional 'Best Of' sets due to low theme-specific results.");
-    const allAvailable = attractions.filter(p => !usedPlaceIdsInSession.has(p.placeId));
-    if(allAvailable.length >= 2) {
-      const weights = allAvailable.map(place => 1 / place.distanceSq);
-      const bestOfLocations = getWeightedRandomSelection(allAvailable, locationsPerSet, weights);
-      if(bestOfLocations.length >= 2) {
-        locationSets.push({ theme: "Best Of The Area", locations: bestOfLocations });
-        bestOfLocations.forEach(loc => usedPlaceIdsInSession.add(loc.placeId));
+  
+  // Second pass: If we don't have enough themed sets, create mixed sets
+  if (locationSets.length < Math.min(numSets, 5)) {
+    console.log(`Only generated ${locationSets.length} themed sets. Creating additional mixed sets.`);
+    
+    // Create mixed sets from remaining attractions
+    const remainingAttractions = attractions.filter(p => !usedPlaceIdsInSession.has(p.placeId));
+    
+    if (remainingAttractions.length >= 2) {
+      // Try to make up to 3 additional "Best Of" sets
+      for (let i = 0; i < 3 && locationSets.length < numSets; i++) {
+        const availableForSet = remainingAttractions.filter(p => !usedPlaceIdsInSession.has(p.placeId));
+        if (availableForSet.length < 2) break;
+        
+        const weights = availableForSet.map(place => 1 / place.distanceSq);
+        const selectedLocations = getWeightedRandomSelection(availableForSet, locationsPerSet, weights);
+        
+        if (selectedLocations.length >= 2) {
+          const setTheme = i === 0 ? "Best Of The Area" : 
+                          (i === 1 ? "Must-See Attractions" : "Local Favorites");
+          
+          locationSets.push({ theme: setTheme, locations: selectedLocations });
+          selectedLocations.forEach(loc => usedPlaceIdsInSession.add(loc.placeId));
+        }
       }
     }
   }
+  
+  // Final pass: If we STILL don't have enough sets, just use the highest rated places
+  if (locationSets.length === 0 && attractions.length >= 2) {
+    console.log("Creating a fallback set with highest-rated attractions");
+    const topRatedPlaces = [...attractions]
+      .sort((a, b) => (parseFloat(b.rating) || 0) - (parseFloat(a.rating) || 0))
+      .slice(0, locationsPerSet);
+    
+    if (topRatedPlaces.length >= 2) {
+      locationSets.push({ theme: "Top-Rated Attractions", locations: topRatedPlaces });
+    }
+  }
+  
   console.log(`Generated ${locationSets.length} diverse location sets.`);
   return locationSets;
 };
