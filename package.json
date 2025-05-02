@@ -20,6 +20,7 @@
     "mongoose": "^8.12.1",
     "morgan": "^1.10.0",
     "ngeohash": "^0.6.3",
+    "node-cron": "^3.0.3",
     "node-fetch": "^3.3.2",
     "openai": "^4.86.2",
     "resend": "^4.1.2"
