@@ -18,12 +18,12 @@ const UserSchema = new mongoose.Schema(
     purchasedTours: [{ type: mongoose.Schema.Types.ObjectId, ref: "Tour" }],
     favorites: [{ type: mongoose.Schema.Types.ObjectId, ref: "Experience" }],
     scheduledDeletion: { type: Date, default: null },
+    deletionInProgress: { type: Boolean, default: false, select: false },
+    deletionStartedAt: { type: Date, default: null, select: false },
 
   },
   { timestamps: true }
 );
 
 export default mongoose.model("User", UserSchema);
-
-
 

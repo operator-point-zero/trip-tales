@@ -212,50 +212,82 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// ✅ Schedule User Deletion (in 24 hours)
-router.post("/delete-account", async (req, res) => {
+// Schedule the authenticated user's account for deletion after a 24-hour grace period.
+router.post("/delete-account", verifyToken, async (req, res) => {
   try {
-    const { userId } = req.body;
-    if (!userId) return res.status(400).json({ error: "User ID is required" });
-
-    const user = await User.findById(userId);
+    const user = await User.findById(req.user.id).select("+deletionInProgress");
     if (!user) return res.status(404).json({ error: "User not found" });
+    if (user.deletionInProgress) {
+      return res.status(409).json({ error: "Account deletion is already in progress" });
+    }
 
-    const deletionDate = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours from now
+    if (user.scheduledDeletion) {
+      return res.status(200).json({
+        message: "Account deletion is already scheduled.",
+        scheduledDeletion: user.scheduledDeletion,
+      });
+    }
+
+    const deletionDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
     user.scheduledDeletion = deletionDate;
     await user.save();
 
-    res.json({ message: "Account scheduled for deletion in 24 hours." });
+    try {
+      await sendEmail(
+        user.email,
+        "Account deletion scheduled",
+        `<p>Your account is scheduled for deletion after a 24-hour grace period.</p><p>To keep your account, sign in and cancel deletion before ${deletionDate.toISOString()}.</p><p>This does not cancel subscriptions billed through Apple or Google; manage those in the store where you subscribed.</p>`
+      );
+    } catch (emailError) {
+      console.error("Failed to send account deletion scheduling email:", emailError);
+    }
+
+    res.json({
+      message: "Account scheduled for deletion in 24 hours.",
+      scheduledDeletion: deletionDate,
+      subscriptionNotice: "Deleting your account does not cancel subscriptions billed through Apple or Google. Cancel those through the store where you subscribed.",
+    });
   } catch (error) {
     console.error("Error scheduling account deletion:", error);
     res.status(500).json({ error: "Failed to schedule account deletion" });
   }
 });
 
-// ✅ Cancel Scheduled Deletion
-router.post("/cancel-delete-account", async (req, res) => {
+// Cancel a scheduled deletion for the authenticated user during the grace period.
+router.post("/cancel-delete-account", verifyToken, async (req, res) => {
   try {
-    const { userId } = req.body;
-    if (!userId) return res.status(400).json({ error: "User ID is required" });
-
-    const user = await User.findById(userId);
+    const user = await User.findById(req.user.id).select("+deletionInProgress");
     if (!user) return res.status(404).json({ error: "User not found" });
+    if (user.deletionInProgress) {
+      return res.status(409).json({ error: "Account deletion is already in progress" });
+    }
 
     if (!user.scheduledDeletion) {
       return res.status(400).json({ message: "No scheduled deletion found." });
     }
+    if (user.scheduledDeletion <= new Date()) {
+      return res.status(410).json({ error: "The deletion grace period has ended" });
+    }
 
-    user.scheduledDeletion = null;
-    await user.save();
+    const canceledUser = await User.findOneAndUpdate(
+      {
+        _id: req.user.id,
+        scheduledDeletion: { $gt: new Date() },
+        deletionInProgress: { $ne: true },
+      },
+      { $set: { scheduledDeletion: null } },
+      { new: true }
+    );
+    if (!canceledUser) {
+      return res.status(409).json({ error: "Account deletion could not be canceled because it has already started" });
+    }
 
     res.json({ message: "Account deletion has been canceled." });
   } catch (error) {
-    console.error("Error canceling deletion:", error);
+    console.error("Error canceling account deletion:", error);
     res.status(500).json({ error: "Failed to cancel account deletion" });
   }
 });
 
 export default router;
-
-
 

@@ -4,7 +4,7 @@ import dotenv from "dotenv";
 import cors from "cors";
 import morgan from "morgan";
 import connectDB from "./config/db.js";
-import openai from "./config/openAI.js"; // Import OpenAI config
+import { generateText } from "./services/aiProvider.js";
 import authRoutes from "./routes/auth/authRoutes.js";
 import experienceRoutes from "./routes/TourGeneration/experienceRoutes.js";
 import feedbackRoutes from "./routes/auth/feedbackRoutes.js";
@@ -44,20 +44,18 @@ app.use('/api/purchases', purchases);
 
 
 
-// OpenAI Test Route (Optional)
-app.get("/api/test-openai", async (req, res) => {
+// AI provider test route
+const testAIProvider = async (req, res) => {
   try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4-turbo",
-      messages: [{ role: "system", content: "Say hello!" }],
-    });
-
-    res.json({ message: response.choices[0].message.content });
+    const message = await generateText("Say hello!");
+    res.json({ message });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: "Failed to connect to OpenAI" });
+    res.status(500).json({ error: "Failed to connect to the configured AI provider" });
   }
-});
+};
+app.get("/api/test-ai", testAIProvider);
+app.get("/api/test-openai", testAIProvider);
 
 // Health Check Route
 app.get("/", (req, res) => {

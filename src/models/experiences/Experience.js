@@ -4,12 +4,15 @@ const locationSchema = new mongoose.Schema({
   lat: { type: Number, required: true },
   lon: { type: Number, required: true },
   locationName: { type: String, required: true }, // Human-readable name
-  placeId: { type: String, required: false }, // Google Places API ID (optional)
-  types: {type: [String], required: false}, // Types of the location from places API
-  rating: {type: String, required: false}, // Rating from places API
-  vicinity: {type: String, required: false}, // Address from places API
-  photos: {type: [String], required: false}, // Photos from places API
-  narration: {type: String, required: false} // Detailed narration from local guide perspective
+  placeId: { type: String, required: false }, // Provider-specific place identifier
+  sourceUrl: { type: String, required: false }, // Link to the provider's source record
+  sourceReferences: { type: [String], required: false }, // OSM-linked Wikipedia or Wikidata references
+  types: {type: [String], required: false}, // Place categories from the selected provider
+  rating: {type: String, required: false}, // Optional provider rating
+  vicinity: {type: String, required: false}, // Provider-supplied address
+  photos: {type: [String], required: false}, // Provider-supplied image URLs
+  narration: {type: String, required: false}, // AI narration grounded in mapped fields
+  narrationStyle: { type: String, required: false },
 });
 
 const experienceSchema = new mongoose.Schema(
