@@ -1,27 +1,18 @@
-import { Resend } from "resend";
-import dotenv from "dotenv";
-
-dotenv.config(); // Load environment variables
-
-const resend = new Resend(process.env.RESEND_API_KEY);
-const FROM_EMAIL = process.env.EMAIL_FROM;
-
-/**
- * Sends an email using Resend.
- * @param {string} to - Recipient email address.
- * @param {string} subject - Email subject.
- * @param {string} html - Email content in HTML.
- */
-export const sendEmail = async (to, subject, html) => {
-  try {
-    await resend.emails.send({
-      from: FROM_EMAIL,
-      to,
-      subject,
-      html,
-    });
-    console.log(`📧 Email sent to ${to}`);
-  } catch (error) {
-    console.error("❌ Resend Email Error:", error);
+export async function sendEmail(env, to, subject, html) {
+  if (!env.RESEND_API_KEY || !env.EMAIL_FROM) {
+    console.warn("Email skipped: RESEND_API_KEY and EMAIL_FROM must be configured");
+    return;
   }
-};
+
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${env.RESEND_API_KEY}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ from: env.EMAIL_FROM, to, subject, html }),
+  });
+  if (!response.ok) {
+    throw new Error(`Resend request failed (${response.status}): ${await response.text()}`);
+  }
+}
