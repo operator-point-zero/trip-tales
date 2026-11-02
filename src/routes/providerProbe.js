@@ -33,15 +33,36 @@ router.post("/", async (req, res) => {
 
   const textProvider = (process.env.AI_PROVIDER || "google").trim().toLowerCase();
   const speechProvider = (process.env.TTS_PROVIDER || "openai").trim().toLowerCase();
-  const textCheck = ["google", "gemini"].includes(textProvider)
-    ? runProbe(async () => {
-        const result = await generateText("Reply with OK.", {
-          maxOutputTokens: 5,
-          timeoutMs,
+  const isGeminiTextConfigured = ["google", "gemini"].includes(textProvider);
+  const textModels = [
+    ["textGeneration", process.env.AI_MODEL],
+    ["experienceTextGeneration", process.env.EXPERIENCE_AI_MODEL],
+    ["narrationTextGeneration", process.env.NARRATION_AI_MODEL],
+  ];
+  const testedModels = new Map();
+  const textChecks = Object.fromEntries(
+    await Promise.all(
+      textModels.map(async ([name, model]) => {
+        const effectiveModel = model || process.env.AI_MODEL || "gemini-3.8-flash";
+        if (!isGeminiTextConfigured) {
+          return [name, { status: "error", errorCode: "GEMINI_TEXT_NOT_CONFIGURED" }];
+        }
+        if (testedModels.has(effectiveModel)) {
+          return [name, { status: "same_model_as_other_check", sameAs: testedModels.get(effectiveModel) }];
+        }
+        testedModels.set(effectiveModel, name);
+        const result = await runProbe(async () => {
+          const text = await generateText("Reply with OK.", {
+            ...(model ? { model } : {}),
+            maxOutputTokens: 5,
+            timeoutMs,
+          });
+          if (!text.trim()) throw new Error("Empty text response");
         });
-        if (!result.trim()) throw new Error("Empty text response");
-      })
-    : Promise.resolve({ status: "error", errorCode: "GEMINI_TEXT_NOT_CONFIGURED" });
+        return [name, result];
+      }),
+    ),
+  );
   const speechCheck = ["google", "gemini"].includes(speechProvider)
     ? runProbe(async () => {
         const audio = await generateSpeech("Health check.", "en", { timeoutMs });
@@ -50,14 +71,17 @@ router.post("/", async (req, res) => {
         }
       })
     : Promise.resolve({ status: "error", errorCode: "GEMINI_SPEECH_NOT_CONFIGURED" });
-  const [text, speech] = await Promise.all([textCheck, speechCheck]);
-  const healthy = text.status === "ok" && speech.status === "ok";
+  const speech = await speechCheck;
+  const healthy =
+    Object.values(textChecks).every(
+      ({ status }) => status === "ok" || status === "same_model_as_other_check",
+    ) && speech.status === "ok";
 
   return res.status(healthy ? 200 : 503).json({
     status: healthy ? "ok" : "degraded",
     checkedAt: new Date().toISOString(),
     provider: "gemini",
-    checks: { textGeneration: text, speechSynthesis: speech },
+    checks: { ...textChecks, speechSynthesis: speech },
   });
 });
 
