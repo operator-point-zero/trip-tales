@@ -1,17 +1,12 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
-import { Storage } from '@google-cloud/storage';
-import { v4 as uuidv4 } from 'uuid';
+import { put } from '@vercel/blob';
+import { randomUUID } from 'node:crypto';
 import { generateSpeech, generateText } from '../../services/aiProvider.js';
 import { getNextNarrationStyle } from '../../services/narrationStyles.js';
 
 dotenv.config();
-
-const storage = new Storage({
-  credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS)
-});
-const bucketName = process.env.GCS_BUCKET_NAME;
 
 const TourDescriptionSchema = new mongoose.Schema({
   locationId: { type: String, unique: true, required: true },
@@ -51,14 +46,13 @@ async function generateAndSaveAudio(narration, locationId, language) {
   try {
     console.log(`Generating audio in language: ${language}`);
     const audioBuffer = await generateSpeech(narration, language);
-    const fileName = `narration-${locationId}-${language}-${uuidv4()}.mp3`;
-    const file = storage.bucket(bucketName).file(fileName);
-
-    await file.save(audioBuffer, {
-      metadata: { contentType: 'audio/mpeg' },
+    const fileName = `narration-${locationId}-${language}-${randomUUID()}.mp3`;
+    const blob = await put(fileName, audioBuffer, {
+      access: 'public',
+      contentType: 'audio/mpeg',
     });
 
-    const audioUrl = `https://storage.googleapis.com/${bucketName}/${fileName}`;
+    const audioUrl = blob.url;
     console.log(`Audio URL: ${audioUrl}`);
     return audioUrl;
   } catch (error) {

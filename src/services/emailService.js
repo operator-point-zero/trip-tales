@@ -3,7 +3,6 @@ import dotenv from "dotenv";
 
 dotenv.config(); // Load environment variables
 
-const resend = new Resend(process.env.RESEND_API_KEY);
 const FROM_EMAIL = process.env.EMAIL_FROM;
 
 /**
@@ -14,6 +13,7 @@ const FROM_EMAIL = process.env.EMAIL_FROM;
  */
 export const sendEmail = async (to, subject, html) => {
   try {
+    const resend = new Resend(process.env.RESEND_API_KEY);
     await resend.emails.send({
       from: FROM_EMAIL,
       to,
