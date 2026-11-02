@@ -15,6 +15,7 @@ import favoritesRoutes from "./routes/TourGeneration/likeExperience.js";
 import reviewRoutes from "./routes/audioGeneration/rate&review.js";
 import purchases from "./routes/auth/purchases.js";
 import healthCheck from "./routes/healthCheck.js";
+import providerProbe from "./routes/providerProbe.js";
 
 
 
@@ -43,6 +44,7 @@ const testAIProvider = async (req, res) => {
 app.get("/api/test-ai", testAIProvider);
 app.get("/api/test-openai", testAIProvider);
 app.use("/api/health", healthCheck);
+app.use("/api/health/providers", providerProbe);
 
 app.get("/api/cron/delete-scheduled-users", async (req, res, next) => {
   const cronSecret = process.env.CRON_SECRET;

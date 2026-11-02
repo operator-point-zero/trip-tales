@@ -12,6 +12,8 @@ The Express API is deployed as a Vercel Function. MongoDB remains the applicatio
 
 The public `GET /api/health` endpoint checks MongoDB, Nominatim, Overpass, and Resend authentication (when configured). It reports environment-variable presence without returning values. AI and speech are reported as skipped so public requests cannot trigger provider usage charges. Blob is checked for token configuration only, not by uploading a test file. The Resend check does not send an email. Google Cloud Storage is reported as unused by this backend.
 
+To test the configured Gemini text and speech APIs on the deployed backend, send `POST /api/health/providers` with `Authorization: Bearer <CRON_SECRET>`. This performs small live provider requests, may incur usage charges, and does not persist the generated output. The endpoint returns only status, elapsed time, and sanitized error codes.
+
 The account-deletion cron runs once daily (`0 0 * * *`) to support Vercel Hobby. Hobby schedules have hourly timing precision; account deletion may therefore happen up to roughly a day after the 24-hour grace period. On Pro or Enterprise, change the schedule in `vercel.json` to `*/5 * * * *` to restore five-minute processing.
 
 Newly generated audio is uploaded to Vercel Blob. Existing MongoDB records are preserved when `MONGO_URI` points to the existing database. Existing audio files and URLs in MongoDB are **not copied** from Google Cloud Storage; keep the old bucket accessible until those files are migrated or regenerated.
