@@ -1,4 +1,3 @@
-import "./routes/auth/deletion_cron.js";
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
@@ -14,6 +13,7 @@ import purchasedToursRoutes from "./routes/auth/usersPurchasedTours.js";
 import favoritesRoutes from "./routes/TourGeneration/likeExperience.js";
 import reviewRoutes from "./routes/audioGeneration/rate&review.js";
 import purchases from "./routes/auth/purchases.js";
+import { processScheduledUserDeletions } from "./routes/auth/deletion_cron.js";
 
 
 
@@ -41,6 +41,20 @@ app.use('/api', favoritesRoutes);
 app.use('/api/rating', reviewRoutes);
 app.use('/api/purchases', purchases);
 
+app.post("/internal/process-scheduled-deletions", async (req, res) => {
+  const expectedSecret = process.env.WORKER_CRON_SECRET;
+  if (!expectedSecret || req.get("x-worker-cron-secret") !== expectedSecret) {
+    return res.sendStatus(401);
+  }
+
+  try {
+    const deletedCount = await processScheduledUserDeletions();
+    return res.json({ deletedCount });
+  } catch (error) {
+    console.error("Scheduled account deletion failed:", error);
+    return res.status(500).json({ error: "Scheduled account deletion failed" });
+  }
+});
 
 
 

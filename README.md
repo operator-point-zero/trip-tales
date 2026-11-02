@@ -1,4 +1,29 @@
-# AI provider configuration
+# Trip Tales Backend
+
+## Cloudflare deployment
+
+The backend runs as a Node.js application in a Cloudflare Container. Its MongoDB, Google Cloud Storage, and other existing integrations remain unchanged; this setup does not migrate data to D1 or audio files to R2.
+
+Before deploying, install Docker and authenticate Wrangler with your Cloudflare account. The `Dockerfile` builds the Node.js service, and `wrangler.jsonc` routes Worker requests to the container and schedules account-deletion processing every five minutes.
+
+Configure the required values as Worker secrets. Run `npx wrangler secret put NAME` once for each secret:
+
+- `MONGO_URI`
+- `JWT_SECRET`
+- `GOOGLE_CREDENTIALS`
+- `GCS_BUCKET_NAME`
+- `RESEND_API_KEY`
+- `EMAIL_FROM`
+- `WORKER_CRON_SECRET` — also protects the internal scheduled-deletion endpoint
+- `GEMINI_API_KEY`, `AI_API_KEY`, `OPENAI_API_KEY`, `TTS_API_KEY`, `ELEVENLABS_API_KEY`, or `ELEVENLABS_VOICE_ID`, as required by the configured providers
+
+Provider selection (`AI_PROVIDER`, `TTS_PROVIDER`), model names, compatible-provider base URLs, voice overrides (including `TTS_VOICE_<LANGUAGE>`), and optional OSM endpoint/contact settings can be configured as Worker variables. The Worker passes these values into the container when it starts. Never put secrets in `wrangler.jsonc` or commit them to source control.
+
+Deploy with `npm run deploy`. For local Cloudflare development, use `npm run cf:dev`; Wrangler needs a Docker-compatible engine to run the container. `npm start` continues to run the Node.js app directly.
+
+The account-deletion schedule is handled by a Cloudflare Cron Trigger, not by a continuously running in-container timer. The Worker calls the container's internal endpoint with `WORKER_CRON_SECRET`; configure that secret before deployment so scheduled cleanup can run.
+
+## AI provider configuration
 
 Text generation and speech synthesis providers are configured in the project-root `.env` file; no provider credentials are sent to the client. Set the credentials, providers, and models in that file, then restart the server. Keep `.env` private; it is ignored by git.
 
