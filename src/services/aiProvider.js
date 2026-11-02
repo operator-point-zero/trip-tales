@@ -47,7 +47,16 @@ const getTextProvider = (modelOverride) => {
 
 export async function generateText(
   prompt,
-  { model, responseFormat, temperature, topP, topK, maxOutputTokens, safetySettings } = {},
+  {
+    model,
+    responseFormat,
+    temperature,
+    topP,
+    topK,
+    maxOutputTokens,
+    safetySettings,
+    timeoutMs,
+  } = {},
 ) {
   const selected = getTextProvider(model);
 
@@ -63,7 +72,10 @@ export async function generateText(
         ...(responseFormat === "json" ? { responseMimeType: "application/json" } : {}),
       },
     });
-    const result = await generativeModel.generateContent(prompt);
+    const result = await generativeModel.generateContent(
+      prompt,
+      timeoutMs ? { timeout: timeoutMs } : undefined,
+    );
     const text = result.response.text();
     if (!text) {
       throw new Error(`The ${selected.model} model returned an empty response`);
@@ -71,14 +83,17 @@ export async function generateText(
     return text;
   }
 
-  const response = await selected.client.chat.completions.create({
-    model: selected.model,
-    messages: [{ role: "user", content: prompt }],
-    ...(responseFormat === "json" ? { response_format: { type: "json_object" } } : {}),
-    ...(temperature !== undefined ? { temperature } : {}),
-    ...(topP !== undefined ? { top_p: topP } : {}),
-    ...(maxOutputTokens !== undefined ? { max_tokens: maxOutputTokens } : {}),
-  });
+  const response = await selected.client.chat.completions.create(
+    {
+      model: selected.model,
+      messages: [{ role: "user", content: prompt }],
+      ...(responseFormat === "json" ? { response_format: { type: "json_object" } } : {}),
+      ...(temperature !== undefined ? { temperature } : {}),
+      ...(topP !== undefined ? { top_p: topP } : {}),
+      ...(maxOutputTokens !== undefined ? { max_tokens: maxOutputTokens } : {}),
+    },
+    timeoutMs ? { maxRetries: 0, timeout: timeoutMs } : undefined,
+  );
   const text = response.choices[0]?.message?.content;
   if (!text) {
     throw new Error(`The ${selected.model} model returned an empty response`);
@@ -86,7 +101,7 @@ export async function generateText(
   return text;
 }
 
-export async function generateSpeech(text, language) {
+export async function generateSpeech(text, language, { timeoutMs } = {}) {
   const provider = (process.env.TTS_PROVIDER || "openai").trim().toLowerCase();
   const model = (
     process.env.TTS_MODEL ||
@@ -136,6 +151,7 @@ export async function generateSpeech(text, language) {
           "x-goog-api-key": apiKey,
           "Content-Type": "application/json",
         },
+        ...(timeoutMs ? { timeout: timeoutMs } : {}),
       },
     );
 
@@ -169,6 +185,7 @@ export async function generateSpeech(text, language) {
           "Content-Type": "application/json",
         },
         responseType: "arraybuffer",
+        ...(timeoutMs ? { timeout: timeoutMs } : {}),
       },
     );
     return Buffer.from(response.data);
@@ -187,7 +204,10 @@ export async function generateSpeech(text, language) {
       apiKey,
       ...(process.env.TTS_BASE_URL ? { baseURL: process.env.TTS_BASE_URL } : {}),
     });
-    const speech = await client.audio.speech.create({ model, voice, input: text });
+    const speech = await client.audio.speech.create(
+      { model, voice, input: text },
+      timeoutMs ? { maxRetries: 0, timeout: timeoutMs } : undefined,
+    );
     return Buffer.from(await speech.arrayBuffer());
   }
 

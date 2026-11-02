@@ -10,6 +10,8 @@ The Express API is deployed as a Vercel Function. MongoDB remains the applicatio
 4. Add the app's runtime environment variables in Vercel for Production (and Preview if needed): `JWT_SECRET`, `CRON_SECRET`, AI/TTS provider keys, and any optional email or OSM settings listed below. `CRON_SECRET` must be a random value of at least 16 characters; Vercel sends it to the scheduled endpoint automatically.
 5. Redeploy after setting environment variables. Verify `/` and `/api/test-ai` on the deployed URL.
 
+The protected `GET /api/health` endpoint checks MongoDB, the configured text and speech providers, Nominatim, Overpass, and Resend authentication (when configured). Call it with `Authorization: Bearer <CRON_SECRET>`. It reports environment-variable presence without returning values. Text and speech probes make live provider requests and may incur usage charges; Blob is checked for token configuration only, not by uploading a test file. The Resend check does not send an email. Google Cloud Storage is reported as unused by this backend.
+
 The account-deletion cron runs once daily (`0 0 * * *`) to support Vercel Hobby. Hobby schedules have hourly timing precision; account deletion may therefore happen up to roughly a day after the 24-hour grace period. On Pro or Enterprise, change the schedule in `vercel.json` to `*/5 * * * *` to restore five-minute processing.
 
 Newly generated audio is uploaded to Vercel Blob. Existing MongoDB records are preserved when `MONGO_URI` points to the existing database. Existing audio files and URLs in MongoDB are **not copied** from Google Cloud Storage; keep the old bucket accessible until those files are migrated or regenerated.
