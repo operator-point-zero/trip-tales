@@ -11,7 +11,7 @@ const getTextProvider = (modelOverride) => {
   const model = (
     modelOverride ||
     process.env.AI_MODEL ||
-    { google: "gemini-1.5-flash", gemini: "gemini-1.5-flash", openai: "gpt-4o-mini" }[provider] ||
+    { google: "gemini-3.8-flash", gemini: "gemini-3.8-flash", openai: "gpt-4o-mini" }[provider] ||
     ""
   ).trim();
 
@@ -90,10 +90,64 @@ export async function generateSpeech(text, language) {
   const provider = (process.env.TTS_PROVIDER || "openai").trim().toLowerCase();
   const model = (
     process.env.TTS_MODEL ||
-    (provider === "elevenlabs" ? "eleven_multilingual_v2" : "tts-1")
+    (provider === "elevenlabs"
+      ? "eleven_multilingual_v2"
+      : provider === "google" || provider === "gemini"
+        ? "gemini-3.8-flash-tts"
+        : "tts-1")
   ).trim();
   const languageVoice =
     typeof language === "string" ? process.env[`TTS_VOICE_${language.toUpperCase()}`] : undefined;
+
+  if (provider === "google" || provider === "gemini") {
+    const apiKey = process.env.GEMINI_API_KEY || process.env.TTS_API_KEY || process.env.AI_API_KEY;
+    if (!apiKey) {
+      throw new Error("GEMINI_API_KEY, TTS_API_KEY, or AI_API_KEY must be set when TTS_PROVIDER is google");
+    }
+
+    const voice = languageVoice || process.env.TTS_VOICE || "Kore";
+    const response = await axios.post(
+      "https://generativelanguage.googleapis.com/v1beta/interactions",
+      {
+        model,
+        input: [
+          {
+            type: "user_input",
+            content: [
+              {
+                type: "text",
+                text,
+                annotations: [
+                  {
+                    type: "speech_metadata",
+                    style: `Clear, natural audio-tour narration spoken in ${language}.`,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        response_format: { type: "audio" },
+        generation_config: { speech_config: [{ voice }] },
+        store: false,
+      },
+      {
+        headers: {
+          "x-goog-api-key": apiKey,
+          "Content-Type": "application/json",
+        },
+      },
+    );
+
+    const audio = response.data?.steps
+      ?.filter((step) => step.type === "model_output")
+      .flatMap((step) => step.content || [])
+      .findLast((part) => part.type === "audio" && part.data);
+    if (!audio?.data) {
+      throw new Error(`The ${model} model returned no audio data`);
+    }
+    return Buffer.from(audio.data, "base64");
+  }
 
   if (provider === "elevenlabs") {
     const apiKey = process.env.ELEVENLABS_API_KEY || process.env.TTS_API_KEY;

@@ -39,13 +39,13 @@ Text generation and speech synthesis providers are configured in the project-roo
 - Google uses `GEMINI_API_KEY` (or `AI_API_KEY`).
 - OpenAI uses `AI_API_KEY` (or `OPENAI_API_KEY`). For compatible services such as OpenRouter, set `AI_PROVIDER=openai-compatible`, `AI_BASE_URL`, `AI_API_KEY`, and `AI_MODEL`.
 
-The `.env` file is preconfigured for Google with `gemini-1.5-flash`; the default OpenAI model is `gpt-4o-mini`. OpenAI-compatible providers require an explicit `AI_MODEL` and `AI_BASE_URL`.
+The `.env` file is preconfigured for Google with `gemini-3.8-flash` and Gemini TTS (`gemini-3.8-flash-tts`). OpenAI-compatible providers require an explicit `AI_MODEL` and `AI_BASE_URL`.
 
 ## Text-to-speech
 
-- `TTS_PROVIDER`: `openai`, `openai-compatible`, or `elevenlabs`.
-- `TTS_MODEL`: selected provider's speech model; the `.env` file uses `tts-1` for OpenAI-compatible speech; ElevenLabs defaults to `eleven_multilingual_v2`.
-- `TTS_VOICE`: provider-specific voice; the `.env` file uses `alloy` for OpenAI-compatible speech. ElevenLabs requires a voice ID via `TTS_VOICE` or `ELEVENLABS_VOICE_ID`.
+- `TTS_PROVIDER`: `google`/`gemini`, `openai`, `openai-compatible`, or `elevenlabs`.
+- `TTS_MODEL`: selected provider's speech model; Gemini defaults to `gemini-3.8-flash-tts`, OpenAI to `tts-1`, and ElevenLabs to `eleven_multilingual_v2`.
+- `TTS_VOICE`: provider-specific voice; Gemini defaults to `Kore`, OpenAI to `alloy`. ElevenLabs requires a voice ID via `TTS_VOICE` or `ELEVENLABS_VOICE_ID`.
 - `TTS_VOICE_<LANGUAGE>`: optional voice override for a language, using its uppercase language code (for example `TTS_VOICE_ES`).
 - OpenAI uses `TTS_API_KEY` (or `OPENAI_API_KEY`). An OpenAI-compatible speech API also needs `TTS_BASE_URL`.
 - ElevenLabs uses `ELEVENLABS_API_KEY` (or `TTS_API_KEY`); optionally configure `ELEVENLABS_BASE_URL`.

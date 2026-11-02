@@ -16,7 +16,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "jsonwebtoken": "^9.0.2",
+    "jose": "^6.2.15",
     "mongoose": "^8.12.1",
     "morgan": "^1.10.0",
     "ngeohash": "^0.6.3",

@@ -1,6 +1,5 @@
 // import express from "express";
 // import User from "../../models/userModel/User.js";
-// import jwt from "jsonwebtoken";
 // import { verifyToken } from "../../middleware/authMiddleware.js";
 // import { sendEmail } from "../../services/emailService.js";
 
@@ -124,7 +123,7 @@
 
 import express from "express";
 import User from "../../models/userModel/User.js";
-import jwt from "jsonwebtoken";
+import { SignJWT } from "jose";
 import { verifyToken } from "../../middleware/authMiddleware.js";
 import { sendEmail } from "../../services/emailService.js";
 
@@ -188,11 +187,14 @@ router.post("/login", async (req, res) => {
       }
     }
 
-    const token = jwt.sign(
-      { id: user._id, subscriptionStatus: user.subscription?.status },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" }
-    );
+    const token = await new SignJWT({
+      id: user._id.toString(),
+      subscriptionStatus: user.subscription?.status,
+    })
+      .setProtectedHeader({ alg: "HS256" })
+      .setIssuedAt()
+      .setExpirationTime("7d")
+      .sign(new TextEncoder().encode(process.env.JWT_SECRET));
 
     res.json({
       token,
@@ -290,4 +292,3 @@ router.post("/cancel-delete-account", verifyToken, async (req, res) => {
 });
 
 export default router;
-

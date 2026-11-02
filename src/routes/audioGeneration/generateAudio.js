@@ -16,7 +16,7 @@ const TourDescriptionSchema = new mongoose.Schema({
   narrations: { type: Map, of: String, default: {} },
   audioUrls: { type: Map, of: String, default: {} },
   narrationStyles: { type: Map, of: String, default: {} },
-  narrationVersion: { type: Number, default: 4 },
+  narrationVersion: { type: Number, default: 5 },
 });
 
 const TourDescription = mongoose.model('TourDescription', TourDescriptionSchema);
@@ -46,10 +46,10 @@ async function generateAndSaveAudio(narration, locationId, language) {
   try {
     console.log(`Generating audio in language: ${language}`);
     const audioBuffer = await generateSpeech(narration, language);
-    const fileName = `narration-${locationId}-${language}-${randomUUID()}.mp3`;
+    const fileName = `narration-${locationId}-${language}-${randomUUID()}.wav`;
     const blob = await put(fileName, audioBuffer, {
       access: 'public',
-      contentType: 'audio/mpeg',
+      contentType: 'audio/wav',
     });
 
     const audioUrl = blob.url;
@@ -95,7 +95,7 @@ router.post('/', async (req, res) => {
 
     if (
       tour &&
-      tour.narrationVersion === 4 &&
+      tour.narrationVersion === 5 &&
       storedStyleName &&
       tour.audioUrls &&
       tour.audioUrls.get(language)
@@ -109,7 +109,7 @@ router.post('/', async (req, res) => {
       });
     }
 
-    if (tour && tour.narrationVersion === 4 && storedStyleName && tour.narrations.get(language)) {
+    if (tour && tour.narrationVersion === 5 && storedStyleName && tour.narrations.get(language)) {
       narrationToUse = tour.narrations.get(language);
       styleToUse = { name: storedStyleName };
     } else {
@@ -124,7 +124,7 @@ router.post('/', async (req, res) => {
       tour.audioUrls.set(language, audioUrl);
       tour.narrations.set(language, narrationToUse);
       tour.narrationStyles.set(language, styleToUse.name);
-      tour.narrationVersion = 4;
+      tour.narrationVersion = 5;
       await tour.save();
 
       return res.json({
@@ -143,7 +143,7 @@ router.post('/', async (req, res) => {
         narrations: { [language]: narrationToUse },
         audioUrls: { [language]: audioUrl },
         narrationStyles: { [language]: styleToUse.name },
-        narrationVersion: 4,
+        narrationVersion: 5,
       });
       await newTour.save();
 
