@@ -1,99 +1,141 @@
-function required(value, message) {
-  if (!value) throw new Error(message);
-  return value;
-}
+import "dotenv/config";
+import axios from "axios";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import OpenAI from "openai";
 
-export async function generateText(prompt, options = {}, env = {}) {
-  const provider = (env.AI_PROVIDER || "google").trim().toLowerCase();
+const getTextProvider = (modelOverride) => {
+  const provider = (process.env.AI_PROVIDER || "google").trim().toLowerCase();
+  if (!["google", "gemini", "openai", "openai-compatible"].includes(provider)) {
+    throw new Error(`Unsupported AI_PROVIDER: ${provider}`);
+  }
   const model = (
-    options.model ||
-    env.AI_MODEL ||
-    ({ google: "gemini-1.5-flash", gemini: "gemini-1.5-flash", openai: "gpt-4o-mini" }[provider] || "")
+    modelOverride ||
+    process.env.AI_MODEL ||
+    { google: "gemini-1.5-flash", gemini: "gemini-1.5-flash", openai: "gpt-4o-mini" }[provider] ||
+    ""
   ).trim();
-  if (!model) throw new Error("AI_MODEL must be set for the selected AI provider");
+
+  if (!model) {
+    throw new Error("AI_MODEL must be set when using an OpenAI-compatible AI provider");
+  }
 
   if (provider === "google" || provider === "gemini") {
-    const apiKey = required(env.GEMINI_API_KEY || env.AI_API_KEY, "GEMINI_API_KEY or AI_API_KEY is required");
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
-            ...(options.topP !== undefined ? { topP: options.topP } : {}),
-            ...(options.topK !== undefined ? { topK: options.topK } : {}),
-            ...(options.maxOutputTokens !== undefined ? { maxOutputTokens: options.maxOutputTokens } : {}),
-            ...(options.responseFormat === "json" ? { responseMimeType: "application/json" } : {}),
-          },
-        }),
+    const apiKey = process.env.GEMINI_API_KEY || process.env.AI_API_KEY;
+    if (!apiKey) {
+      throw new Error("GEMINI_API_KEY or AI_API_KEY must be set when AI_PROVIDER is google");
+    }
+    return { provider: "google", client: new GoogleGenerativeAI(apiKey), model };
+  }
+
+  if (provider === "openai" || provider === "openai-compatible") {
+    const apiKey = process.env.AI_API_KEY || process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new Error("AI_API_KEY or OPENAI_API_KEY must be set for the selected AI provider");
+    }
+    if (provider === "openai-compatible" && !process.env.AI_BASE_URL) {
+      throw new Error("AI_BASE_URL must be set when AI_PROVIDER is openai-compatible");
+    }
+    const client = new OpenAI({
+      apiKey,
+      ...(process.env.AI_BASE_URL ? { baseURL: process.env.AI_BASE_URL } : {}),
+    });
+    return { provider: "openai", client, model };
+  }
+
+  throw new Error(`Unsupported AI_PROVIDER: ${provider}`);
+};
+
+export async function generateText(
+  prompt,
+  { model, responseFormat, temperature, topP, topK, maxOutputTokens, safetySettings } = {},
+) {
+  const selected = getTextProvider(model);
+
+  if (selected.provider === "google") {
+    const generativeModel = selected.client.getGenerativeModel({
+      model: selected.model,
+      ...(safetySettings ? { safetySettings } : {}),
+      generationConfig: {
+        ...(temperature !== undefined ? { temperature } : {}),
+        ...(topP !== undefined ? { topP } : {}),
+        ...(topK !== undefined ? { topK } : {}),
+        ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+        ...(responseFormat === "json" ? { responseMimeType: "application/json" } : {}),
       },
-    );
-    if (!response.ok) throw new Error(`Google AI request failed (${response.status}): ${await response.text()}`);
-    const result = await response.json();
-    const text = result.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("");
-    if (!text) throw new Error(`${model} returned an empty response`);
+    });
+    const result = await generativeModel.generateContent(prompt);
+    const text = result.response.text();
+    if (!text) {
+      throw new Error(`The ${selected.model} model returned an empty response`);
+    }
     return text;
   }
 
-  if (provider !== "openai" && provider !== "openai-compatible") {
-    throw new Error(`Unsupported AI_PROVIDER: ${provider}`);
-  }
-  const apiKey = required(env.AI_API_KEY || env.OPENAI_API_KEY, "AI_API_KEY or OPENAI_API_KEY is required");
-  const baseUrl = provider === "openai-compatible"
-    ? required(env.AI_BASE_URL, "AI_BASE_URL is required for openai-compatible")
-    : "https://api.openai.com/v1";
-  const response = await fetch(`${baseUrl.replace(/\/+$/, "")}/chat/completions`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: "user", content: prompt }],
-      ...(options.responseFormat === "json" ? { response_format: { type: "json_object" } } : {}),
-      ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
-      ...(options.topP !== undefined ? { top_p: options.topP } : {}),
-      ...(options.maxOutputTokens !== undefined ? { max_tokens: options.maxOutputTokens } : {}),
-    }),
+  const response = await selected.client.chat.completions.create({
+    model: selected.model,
+    messages: [{ role: "user", content: prompt }],
+    ...(responseFormat === "json" ? { response_format: { type: "json_object" } } : {}),
+    ...(temperature !== undefined ? { temperature } : {}),
+    ...(topP !== undefined ? { top_p: topP } : {}),
+    ...(maxOutputTokens !== undefined ? { max_tokens: maxOutputTokens } : {}),
   });
-  if (!response.ok) throw new Error(`AI request failed (${response.status}): ${await response.text()}`);
-  const result = await response.json();
-  const text = result.choices?.[0]?.message?.content;
-  if (typeof text !== "string" || !text) throw new Error(`${model} returned an empty response`);
+  const text = response.choices[0]?.message?.content;
+  if (!text) {
+    throw new Error(`The ${selected.model} model returned an empty response`);
+  }
   return text;
 }
 
-export async function generateSpeech(text, language, env = {}) {
-  const provider = (env.TTS_PROVIDER || "openai").trim().toLowerCase();
-  const model = (env.TTS_MODEL || (provider === "elevenlabs" ? "eleven_multilingual_v2" : "tts-1")).trim();
-  const languageVoice = env[`TTS_VOICE_${language.toUpperCase()}`];
+export async function generateSpeech(text, language) {
+  const provider = (process.env.TTS_PROVIDER || "openai").trim().toLowerCase();
+  const model = (
+    process.env.TTS_MODEL ||
+    (provider === "elevenlabs" ? "eleven_multilingual_v2" : "tts-1")
+  ).trim();
+  const languageVoice =
+    typeof language === "string" ? process.env[`TTS_VOICE_${language.toUpperCase()}`] : undefined;
 
   if (provider === "elevenlabs") {
-    const apiKey = required(env.ELEVENLABS_API_KEY || env.TTS_API_KEY, "ELEVENLABS_API_KEY or TTS_API_KEY is required");
-    const voiceId = required(languageVoice || env.TTS_VOICE || env.ELEVENLABS_VOICE_ID, "TTS_VOICE or ELEVENLABS_VOICE_ID is required");
-    const baseUrl = (env.ELEVENLABS_BASE_URL || "https://api.elevenlabs.io").replace(/\/+$/, "");
-    const response = await fetch(`${baseUrl}/v1/text-to-speech/${encodeURIComponent(voiceId)}`, {
-      method: "POST",
-      headers: { "xi-api-key": apiKey, accept: "audio/mpeg", "content-type": "application/json" },
-      body: JSON.stringify({ text, model_id: model }),
-    });
-    if (!response.ok) throw new Error(`ElevenLabs request failed (${response.status}): ${await response.text()}`);
-    return response.arrayBuffer();
+    const apiKey = process.env.ELEVENLABS_API_KEY || process.env.TTS_API_KEY;
+    const voiceId = languageVoice || process.env.TTS_VOICE || process.env.ELEVENLABS_VOICE_ID;
+    if (!apiKey) {
+      throw new Error("ELEVENLABS_API_KEY or TTS_API_KEY must be set when TTS_PROVIDER is elevenlabs");
+    }
+    if (!voiceId) {
+      throw new Error("TTS_VOICE or ELEVENLABS_VOICE_ID must be set when TTS_PROVIDER is elevenlabs");
+    }
+    const baseUrl = (process.env.ELEVENLABS_BASE_URL || "https://api.elevenlabs.io").replace(/\/+$/, "");
+    const response = await axios.post(
+      `${baseUrl}/v1/text-to-speech/${encodeURIComponent(voiceId)}`,
+      { text, model_id: model },
+      {
+        headers: {
+          "xi-api-key": apiKey,
+          Accept: "audio/mpeg",
+          "Content-Type": "application/json",
+        },
+        responseType: "arraybuffer",
+      },
+    );
+    return Buffer.from(response.data);
   }
 
-  if (provider !== "openai" && provider !== "openai-compatible") {
-    throw new Error(`Unsupported TTS_PROVIDER: ${provider}`);
+  if (provider === "openai" || provider === "openai-compatible") {
+    const apiKey = process.env.TTS_API_KEY || process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new Error("TTS_API_KEY or OPENAI_API_KEY must be set for the selected TTS provider");
+    }
+    if (provider === "openai-compatible" && !process.env.TTS_BASE_URL) {
+      throw new Error("TTS_BASE_URL must be set when TTS_PROVIDER is openai-compatible");
+    }
+    const voice = languageVoice || process.env.TTS_VOICE || "alloy";
+    const client = new OpenAI({
+      apiKey,
+      ...(process.env.TTS_BASE_URL ? { baseURL: process.env.TTS_BASE_URL } : {}),
+    });
+    const speech = await client.audio.speech.create({ model, voice, input: text });
+    return Buffer.from(await speech.arrayBuffer());
   }
-  const apiKey = required(env.TTS_API_KEY || env.OPENAI_API_KEY, "TTS_API_KEY or OPENAI_API_KEY is required");
-  const baseUrl = provider === "openai-compatible"
-    ? required(env.TTS_BASE_URL, "TTS_BASE_URL is required for openai-compatible")
-    : "https://api.openai.com/v1";
-  const response = await fetch(`${baseUrl.replace(/\/+$/, "")}/audio/speech`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-    body: JSON.stringify({ model, voice: languageVoice || env.TTS_VOICE || "alloy", input: text }),
-  });
-  if (!response.ok) throw new Error(`Speech request failed (${response.status}): ${await response.text()}`);
-  return response.arrayBuffer();
+
+  throw new Error(`Unsupported TTS_PROVIDER: ${provider}`);
 }

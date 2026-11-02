@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "trip-tales-api",
-  "main": "src/index.js",
+  "main": "src/worker.js",
   "compatibility_date": "2026-11-02",
   "observability": {
     "enabled": true
@@ -9,18 +9,25 @@
   "triggers": {
     "crons": ["*/5 * * * *"]
   },
-  "d1_databases": [
+  "containers": [
     {
-      "binding": "DB",
-      "database_name": "trip-tales",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
-      "migrations_dir": "migrations"
+      "class_name": "ApiContainer",
+      "image": "./Dockerfile",
+      "max_instances": 1
     }
   ],
-  "r2_buckets": [
-    {
-      "binding": "AUDIO_BUCKET",
-      "bucket_name": "trip-tales-audio"
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "API_CONTAINER",
+        "class_name": "ApiContainer"
+      }
+    ]
+  },
+  "exports": {
+    "ApiContainer": {
+      "type": "durable-object",
+      "storage": "sqlite"
     }
-  ]
+  }
 }

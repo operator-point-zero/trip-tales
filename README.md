@@ -2,56 +2,76 @@
 
 ## Cloudflare deployment
 
-This backend runs as a Cloudflare Worker. D1 stores application data, R2 stores generated narration audio, and a Workers Cron Trigger processes due account deletions every five minutes. MongoDB, Google Cloud Storage, Express, and the Node.js server are not used.
+The backend runs as a Node.js application in a Cloudflare Container. Its MongoDB, Google Cloud Storage, and other existing integrations remain unchanged; this setup does not migrate data to D1 or audio files to R2.
 
-The included D1 migration creates a fresh database. Existing MongoDB records and existing Google Cloud Storage audio are **not** migrated; export/import them separately if they need to be retained.
+Before deploying, install Docker and authenticate Wrangler with your Cloudflare account. The `Dockerfile` builds the Node.js service, and `wrangler.jsonc` routes Worker requests to the container and schedules account-deletion processing every five minutes.
 
-### Provision the Cloudflare resources
+Configure the required values as Worker secrets. Run `npx wrangler secret put NAME` once for each secret:
 
-Install dependencies and authenticate with Cloudflare:
-
-```sh
-npm ci
-npx wrangler login
-npx wrangler d1 create trip-tales
-npx wrangler r2 bucket create trip-tales-audio
-```
-
-Copy the `database_id` returned by D1 into `wrangler.jsonc` in place of `REPLACE_WITH_D1_DATABASE_ID`. The R2 bucket name must match the configured bucket.
-
-### Configure secrets and variables
-
-Add secrets with `npx wrangler secret put NAME` (Wrangler prompts for each value):
-
+- `MONGO_URI`
 - `JWT_SECRET`
+- `GOOGLE_CREDENTIALS`
+- `GCS_BUCKET_NAME`
 - `RESEND_API_KEY`
-- Text generation credentials: `GEMINI_API_KEY` or `AI_API_KEY`; for OpenAI, `AI_API_KEY` or `OPENAI_API_KEY`
-- Speech credentials: `TTS_API_KEY` or `OPENAI_API_KEY`; for ElevenLabs, `ELEVENLABS_API_KEY` (or `TTS_API_KEY`) and `TTS_VOICE` or `ELEVENLABS_VOICE_ID`
+- `EMAIL_FROM`
+- `WORKER_CRON_SECRET` — also protects the internal scheduled-deletion endpoint
+- `GEMINI_API_KEY`, `AI_API_KEY`, `OPENAI_API_KEY`, `TTS_API_KEY`, `ELEVENLABS_API_KEY`, or `ELEVENLABS_VOICE_ID`, as required by the configured providers
 
-Set non-secret values in `wrangler.jsonc` under `vars` or in the Cloudflare dashboard: `EMAIL_FROM`, `AI_PROVIDER`, `AI_MODEL`, `AI_BASE_URL`, `EXPERIENCE_AI_MODEL`, `NARRATION_AI_MODEL`, `TTS_PROVIDER`, `TTS_MODEL`, `TTS_BASE_URL`, `TTS_VOICE`, `TTS_VOICE_<LANGUAGE>`, `ELEVENLABS_BASE_URL`, `OSM_NOMINATIM_URL`, `OSM_OVERPASS_URL`, and `OSM_CONTACT_EMAIL`, as applicable. Never commit credentials.
+Provider selection (`AI_PROVIDER`, `TTS_PROVIDER`), model names, compatible-provider base URLs, voice overrides (including `TTS_VOICE_<LANGUAGE>`), and optional OSM endpoint/contact settings can be configured as Worker variables. The Worker passes these values into the container when it starts. Never put secrets in `wrangler.jsonc` or commit them to source control.
 
-After setting up the bindings and secrets, apply the schema and deploy:
+Deploy with `npm run deploy`. For local Cloudflare development, use `npm run cf:dev`; Wrangler needs a Docker-compatible engine to run the container. `npm start` continues to run the Node.js app directly.
 
-```sh
-npx wrangler d1 migrations apply trip-tales --remote
-npm run deploy
-```
+The account-deletion schedule is handled by a Cloudflare Cron Trigger, not by a continuously running in-container timer. The Worker calls the container's internal endpoint with `WORKER_CRON_SECRET`; configure that secret before deployment so scheduled cleanup can run.
 
-### Local development
+## AI provider configuration
 
-Create `.dev.vars` (ignored by Git) with the secrets needed for the features you test. Apply the schema locally and start Wrangler:
+Text generation and speech synthesis providers are configured in the project-root `.env` file; no provider credentials are sent to the client. Set the credentials, providers, and models in that file, then restart the server. Keep `.env` private; it is ignored by git.
 
-```sh
-npx wrangler d1 migrations apply trip-tales --local
-npm run dev
-```
+## Text generation
 
-## API and content notes
+- `AI_PROVIDER`: `google` (or `gemini`), `openai`, or `openai-compatible`.
+- `AI_MODEL`: default text model used for AI narration and by the `/api/test-ai` connectivity check.
+- `EXPERIENCE_AI_MODEL` and `NARRATION_AI_MODEL`: optional model overrides for those narration flows.
+- Google uses `GEMINI_API_KEY` (or `AI_API_KEY`).
+- OpenAI uses `AI_API_KEY` (or `OPENAI_API_KEY`). For compatible services such as OpenRouter, set `AI_PROVIDER=openai-compatible`, `AI_BASE_URL`, `AI_API_KEY`, and `AI_MODEL`.
 
-Text generation and speech synthesis support Google/Gemini, OpenAI, OpenAI-compatible endpoints, and ElevenLabs. `/api/test-ai` and its backwards-compatible `/api/test-openai` alias check the configured text-generation provider.
+The `.env` file is preconfigured for Google with `gemini-1.5-flash`; the default OpenAI model is `gpt-4o-mini`. OpenAI-compatible providers require an explicit `AI_MODEL` and `AI_BASE_URL`.
 
-Experience discovery uses OpenStreetMap's public Nominatim and Overpass services. They are community-operated and rate-limited; configure `OSM_CONTACT_EMAIL` and consider a hosted provider for sustained production traffic. The API returns OpenStreetMap attribution; display it in the client as required by the [OpenStreetMap attribution guidelines](https://www.openstreetmap.org/copyright).
+## Text-to-speech
 
-AI-generated narration and map records can be inaccurate or incomplete. Responses include a content note asking users to verify factual claims. Narration audio is served by this Worker from the configured R2 bucket.
+- `TTS_PROVIDER`: `openai`, `openai-compatible`, or `elevenlabs`.
+- `TTS_MODEL`: selected provider's speech model; the `.env` file uses `tts-1` for OpenAI-compatible speech; ElevenLabs defaults to `eleven_multilingual_v2`.
+- `TTS_VOICE`: provider-specific voice; the `.env` file uses `alloy` for OpenAI-compatible speech. ElevenLabs requires a voice ID via `TTS_VOICE` or `ELEVENLABS_VOICE_ID`.
+- `TTS_VOICE_<LANGUAGE>`: optional voice override for a language, using its uppercase language code (for example `TTS_VOICE_ES`).
+- OpenAI uses `TTS_API_KEY` (or `OPENAI_API_KEY`). An OpenAI-compatible speech API also needs `TTS_BASE_URL`.
+- ElevenLabs uses `ELEVENLABS_API_KEY` (or `TTS_API_KEY`); optionally configure `ELEVENLABS_BASE_URL`.
 
-Authenticated users can schedule account deletion with `POST /api/auth/delete-account` and cancel during the 24-hour grace period with `POST /api/auth/cancel-delete-account`. Both require an `Authorization` bearer token. A Cloudflare Cron Trigger processes due accounts every five minutes. Account deletion does not cancel subscriptions billed through Apple or Google.
+Provider and model values are selected from environment configuration rather than route-level constants. The `/api/test-ai` endpoint checks the configured text-generation provider; `/api/test-openai` remains available as a backwards-compatible alias.
+
+## Places and geocoding
+
+Experience discovery uses OpenStreetMap data through the public Nominatim reverse-geocoding and Overpass API services. These services require no API key; their endpoints can be changed with `OSM_NOMINATIM_URL` and `OSM_OVERPASS_URL` in `.env`. Set `OSM_CONTACT_EMAIL` to identify your application in service requests.
+
+Nearby-place discovery is restricted to named visitor attractions, museums, artworks, viewpoints, cultural institutions, historic and heritage features, notable architecture, religious sites, parks, nature reserves, and protected/national areas. The query does not request general shops, offices, crafts, or industrial places; records carrying those business tags are excluded even if they also have a tourist tag. OSM coverage and tagging vary by region, so no query can guarantee that every site is classified consistently.
+
+The public services are community-operated, rate-limited, and have no uptime guarantee. The backend caches nearby-place results for an hour and spaces Nominatim requests to respect its public usage policy. For sustained production traffic, use a hosted OSM provider or self-host the services. OpenStreetMap coverage varies by location, and photos are returned only when OSM records an image or Wikimedia Commons reference.
+
+The experiences API response includes an `attribution` field. Display it visibly in the client as required by the [OpenStreetMap attribution guidelines](https://www.openstreetmap.org/copyright).
+
+## Factual accuracy
+
+Tour narration uses AI with OpenStreetMap fields or the submitted place name and coordinates as grounding, plus the model's general knowledge to make it sound like a tour guide. Prompts discourage specific unsupported claims and ask the model to flag uncertainty. Each discovered place includes its OSM source link, but the AI does not verify claims against that link or independently research them.
+
+These safeguards reduce but cannot eliminate hallucinations. AI-generated narration and user-submitted place data may be inaccurate; map records may also be incomplete or out of date. Responses include a `contentNote` warning users to verify factual claims. Previously generated source-only tours and narrations are bypassed using versioned keys.
+
+## Narration styles
+
+Generated stops rotate through distinct writing styles (such as curious companion, field notes, museum audio guide, storyteller, thoughtful conversation, and reflective). The selected style is returned as `narrationStyle` and stored with generated tour stops; older cached narrations are bypassed after style changes. This varies the script, not the synthesized speaker voice: TTS voice selection remains controlled by `TTS_VOICE` and its language overrides.
+
+Nearby OSM records with the same normalized name within 50 metres, or the same OSM element ID, are merged before tour selection. Places with linked Wikipedia or Wikidata references may appear in up to two differently themed experiences; other places appear only once. This keeps duplicates down while allowing a sourced landmark to fit more than one tour.
+
+## Account deletion
+
+Authenticated users can request deletion with `POST /api/auth/delete-account` and cancel during the 24-hour grace period with `POST /api/auth/cancel-delete-account`. Both endpoints require `Authorization: Bearer <token>` and use the user ID from the verified token rather than trusting a user ID in the request body. A scheduled job processes due requests every five minutes.
+
+Deletion removes the account, its authored experiences, feedback, ratings, and favorite references. Purchase transaction records are retained with the user association cleared. Deleting the app account does not cancel billing managed by Apple or Google; users must cancel those subscriptions through the store where they subscribed.
