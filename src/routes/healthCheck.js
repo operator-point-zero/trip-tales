@@ -3,7 +3,6 @@ import dotenv from "dotenv";
 import express from "express";
 import mongoose from "mongoose";
 import connectDB from "../config/db.js";
-import { generateSpeech, generateText } from "../services/aiProvider.js";
 
 dotenv.config();
 
@@ -55,12 +54,6 @@ const makeCheck = async (callback) => {
   }
 };
 
-const checkTextGeneration = (model) =>
-  generateText("Reply with OK.", { model, maxOutputTokens: 5, timeoutMs: probeTimeoutMs });
-
-const checkSpeechSynthesis = () =>
-  generateSpeech("Health check.", "en", { timeoutMs: probeTimeoutMs });
-
 const checkNominatim = async () => {
   const response = await axios.get(
     process.env.OSM_NOMINATIM_URL || "https://nominatim.openstreetmap.org/reverse",
@@ -106,40 +99,35 @@ const checkResend = async () => {
 
 const getChecks = async () => {
   const checks = {};
-  const missingRequired = ["MONGO_URI", "JWT_SECRET", "CRON_SECRET"].filter(
+  const missingRequired = ["MONGO_URI", "JWT_SECRET"].filter(
     (key) => !process.env[key],
   );
 
   checks.requiredConfiguration = missingRequired.length
     ? { status: "error", missing: missingRequired }
     : { status: "ok" };
-  const extraTextModels = [
-    ["experienceTextGeneration", process.env.EXPERIENCE_AI_MODEL],
-    ["narrationTextGeneration", process.env.NARRATION_AI_MODEL],
-  ].filter(([, model]) => model && model !== process.env.AI_MODEL);
   const emailCheck =
     process.env.RESEND_API_KEY && process.env.EMAIL_FROM
       ? makeCheck(checkResend)
       : Promise.resolve(null);
-  const [database, textGeneration, speechSynthesis, nominatim, overpass, extraTextChecks, email] =
-    await Promise.all([
-      makeCheck(async () => {
-        await connectDB();
-        await mongoose.connection.db.admin().ping();
-      }),
-      makeCheck(() => checkTextGeneration(process.env.AI_MODEL)),
-      makeCheck(checkSpeechSynthesis),
-      makeCheck(checkNominatim),
-      makeCheck(checkOverpass),
-      Promise.all(extraTextModels.map(([, model]) => makeCheck(() => checkTextGeneration(model)))),
-      emailCheck,
-    ]);
+  const [database, nominatim, overpass, email] = await Promise.all([
+    makeCheck(async () => {
+      await connectDB();
+      await mongoose.connection.db.admin().ping();
+    }),
+    makeCheck(checkNominatim),
+    makeCheck(checkOverpass),
+    emailCheck,
+  ]);
   checks.database = database;
-  checks.textGeneration = textGeneration;
-  checks.speechSynthesis = speechSynthesis;
-  extraTextModels.forEach(([checkName], index) => {
-    checks[checkName] = extraTextChecks[index];
-  });
+  checks.textGeneration = {
+    status: "skipped",
+    reason: "Live AI requests are disabled on the public health endpoint",
+  };
+  checks.speechSynthesis = {
+    status: "skipped",
+    reason: "Live speech requests are disabled on the public health endpoint",
+  };
   checks.blobStorage = process.env.BLOB_READ_WRITE_TOKEN
     ? { status: "ok", verification: "token_configured_only" }
     : { status: "error", errorCode: "BLOB_READ_WRITE_TOKEN_MISSING" };
@@ -169,14 +157,6 @@ const getChecks = async () => {
 };
 
 router.get("/", async (req, res) => {
-  const cronSecret = process.env.CRON_SECRET;
-  if (!cronSecret) {
-    return res.status(503).json({ error: "Health check authentication is not configured" });
-  }
-  if (req.headers.authorization !== `Bearer ${cronSecret}`) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-
   const checks = await getChecks();
   const environment = Object.fromEntries(
     [...environmentKeys, ...Object.keys(process.env).filter((key) => key.startsWith("TTS_VOICE_"))]
