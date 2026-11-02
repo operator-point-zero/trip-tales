@@ -5,9 +5,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "nodemon src/index.js",
-    "deploy": "wrangler deploy",
-    "cf:dev": "wrangler dev"
+    "dev": "nodemon src/index.js"
   },
   "dependencies": {
     "@google-cloud/storage": "^7.15.2",
@@ -26,9 +24,5 @@
     "node-fetch": "^3.3.2",
     "openai": "^4.86.2",
     "resend": "^4.1.2"
-  },
-  "devDependencies": {
-    "@cloudflare/containers": "^0.3.7",
-    "wrangler": "^4.156.1"
   }
 }
